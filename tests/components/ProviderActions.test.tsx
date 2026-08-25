@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProviderActions } from "@/components/providers/ProviderActions";
 
-function renderPiActions({
+function renderOpenCodeActions({
   isCurrent = false,
   isInConfig = false,
   isRemovalProtected = false,
@@ -32,7 +32,7 @@ function renderPiActions({
 }) {
   render(
     <ProviderActions
-      appId="pi"
+      appId="opencode"
       isCurrent={isCurrent}
       isInConfig={isInConfig}
       isRemovalProtected={isRemovalProtected}
@@ -51,7 +51,7 @@ function renderPiActions({
   return { onSwitch, onEdit, onRemoveFromConfig, onDelete, onSetAsDefault };
 }
 
-describe("ProviderActions Pi provider switching", () => {
+describe("ProviderActions OpenCode provider membership", () => {
   it("omits duplication when the caller disallows it", () => {
     render(
       <ProviderActions
@@ -66,11 +66,11 @@ describe("ProviderActions Pi provider switching", () => {
     expect(screen.queryByTitle("provider.duplicate")).not.toBeInTheDocument();
   });
 
-  it("enables a provider that is not in Pi", async () => {
+  it("adds a provider that is not in OpenCode", async () => {
     const user = userEvent.setup();
-    const { onSwitch } = renderPiActions({});
+    const { onSwitch } = renderOpenCodeActions({});
 
-    await user.click(screen.getByRole("button", { name: "启用" }));
+    await user.click(screen.getByRole("button", { name: "添加" }));
 
     expect(onSwitch).toHaveBeenCalledTimes(1);
     expect(
@@ -80,9 +80,8 @@ describe("ProviderActions Pi provider switching", () => {
 
   it("offers removal without a default-selection action", async () => {
     const user = userEvent.setup();
-    const { onRemoveFromConfig, onSetAsDefault, onSwitch } = renderPiActions({
-      isInConfig: true,
-    });
+    const { onRemoveFromConfig, onSetAsDefault, onSwitch } =
+      renderOpenCodeActions({ isInConfig: true });
 
     await user.click(screen.getByRole("button", { name: "移除" }));
 
@@ -94,8 +93,8 @@ describe("ProviderActions Pi provider switching", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not turn Pi's current selection into a UI state", () => {
-    renderPiActions({
+  it("does not turn OpenCode's current selection into a UI state", () => {
+    renderOpenCodeActions({
       isCurrent: true,
       isInConfig: true,
     });
@@ -107,9 +106,9 @@ describe("ProviderActions Pi provider switching", () => {
     expect(screen.getByRole("button", { name: "common.delete" })).toBeEnabled();
   });
 
-  it("fails closed while Pi's authoritative state is unavailable", async () => {
+  it("blocks OpenCode membership changes while state changes are protected", async () => {
     const user = userEvent.setup();
-    const { onSwitch, onEdit, onDelete } = renderPiActions({
+    const { onSwitch, onEdit, onDelete } = renderOpenCodeActions({
       isStateChangeProtected: true,
     });
 
@@ -119,7 +118,7 @@ describe("ProviderActions Pi provider switching", () => {
     });
     const editButton = screen.getByRole("button", { name: "common.edit" });
     expect(enableButton).toBeDisabled();
-    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toBeEnabled();
     expect(editButton).toBeEnabled();
 
     await user.click(enableButton);
@@ -127,19 +126,19 @@ describe("ProviderActions Pi provider switching", () => {
     await user.click(deleteButton);
     expect(onSwitch).not.toHaveBeenCalled();
     expect(onEdit).toHaveBeenCalledTimes(1);
-    expect(onDelete).not.toHaveBeenCalled();
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Pi in membership mode even if stale failover props are supplied", async () => {
+  it("keeps OpenCode in membership mode even if stale failover props are supplied", async () => {
     const user = userEvent.setup();
     const onToggleFailover = vi.fn();
-    const { onSwitch } = renderPiActions({
+    const { onSwitch } = renderOpenCodeActions({
       isAutoFailoverEnabled: true,
       isInFailoverQueue: false,
       onToggleFailover,
     });
 
-    await user.click(screen.getByRole("button", { name: "启用" }));
+    await user.click(screen.getByRole("button", { name: "添加" }));
 
     expect(onSwitch).toHaveBeenCalledTimes(1);
     expect(onToggleFailover).not.toHaveBeenCalled();

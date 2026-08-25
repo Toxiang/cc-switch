@@ -26,6 +26,7 @@ import {
   riskI18nKey,
 } from "@/utils/deeplinkRisk";
 import { decodeBase64Utf8 } from "@/lib/utils/base64";
+import { APP_IDS } from "@/config/appConfig";
 
 interface DeeplinkError {
   url: string;
@@ -62,12 +63,44 @@ export function DeepLinkImportDialog() {
     const unlistenImport = listen<DeepLinkImportRequest>(
       "deeplink-import",
       async (event) => {
+        const payload = { ...event.payload };
+        if (
+          (payload.resource === "provider" || payload.resource === "prompt") &&
+          (!payload.app || !APP_IDS.includes(payload.app))
+        ) {
+          toast.error(t("deeplink.importError"), {
+            description: t("deeplink.unsupportedApp", {
+              app: payload.app ?? t("common.unknown"),
+              defaultValue:
+                "This build only supports Codex and OpenCode imports (received: {{app}}).",
+            }),
+          });
+          return;
+        }
+
+        if (payload.resource === "mcp" && payload.apps) {
+          const supportedApps = payload.apps
+            .split(",")
+            .map((app) => app.trim())
+            .filter((app) => APP_IDS.includes(app as (typeof APP_IDS)[number]));
+          if (supportedApps.length === 0) {
+            toast.error(t("deeplink.importError"), {
+              description: t("deeplink.unsupportedApp", {
+                app: payload.apps,
+                defaultValue:
+                  "This build only supports Codex and OpenCode imports (received: {{app}}).",
+              }),
+            });
+            return;
+          }
+          payload.apps = supportedApps.join(",");
+        }
+
         // If config is present, merge it to get the complete configuration
-        if (event.payload.config || event.payload.configUrl) {
+        if (payload.config || payload.configUrl) {
           try {
-            const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(
-              event.payload,
-            );
+            const mergedRequest =
+              await deeplinkApi.mergeDeeplinkConfig(payload);
             setRequest(mergedRequest);
           } catch (error) {
             console.error("Failed to merge config:", error);
@@ -76,10 +109,10 @@ export function DeepLinkImportDialog() {
                 error instanceof Error ? error.message : String(error),
             });
             // Fall back to original request
-            setRequest(event.payload);
+            setRequest(payload);
           }
         } else {
-          setRequest(event.payload);
+          setRequest(payload);
         }
 
         setIsOpen(true);

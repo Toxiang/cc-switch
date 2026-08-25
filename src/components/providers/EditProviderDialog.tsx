@@ -10,7 +10,6 @@ import {
 } from "@/components/providers/forms/ProviderForm";
 import { AuthSettingsPanel } from "@/components/providers/AuthSettingsPanel";
 import {
-  openclawApi,
   providersApi,
   vscodeApi,
   type AppId,
@@ -54,12 +53,10 @@ export function EditProviderDialog({
   currentFormReadyToken.current = formReadyToken;
   const [formReadyState, setFormReadyState] = useState({
     token: formReadyToken,
-    ready: appId !== "pi",
+    ready: true,
   });
   const isFormReady =
-    formReadyState.token === formReadyToken
-      ? formReadyState.ready
-      : appId !== "pi";
+    formReadyState.token === formReadyToken ? formReadyState.ready : true;
   const handleSubmitReadyChange = useCallback(
     (ready: boolean) => {
       if (currentFormReadyToken.current === formReadyToken) {
@@ -115,33 +112,12 @@ export function EditProviderDialog({
         return;
       }
 
-      // OpenCode uses additive mode, while Pi's shared models.json is owned by
-      // the catalog coordinator. Neither has a per-provider generic live
-      // snapshot that may replace the DB aggregate in this form.
-      if (appId === "opencode" || appId === "pi") {
+      // OpenCode uses additive mode and has no per-provider generic live
+      // snapshot that may replace the database aggregate in this form.
+      if (appId === "opencode") {
         if (!cancelled) {
           setLiveSettings(null);
           setHasLoadedLive(true);
-        }
-        return;
-      }
-
-      if (appId === "openclaw") {
-        try {
-          const live = await openclawApi.getLiveProvider(provider.id);
-          if (!cancelled && live && typeof live === "object") {
-            setLiveSettings(live);
-          } else if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } catch {
-          if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } finally {
-          if (!cancelled) {
-            setHasLoadedLive(true);
-          }
         }
         return;
       }
@@ -232,14 +208,13 @@ export function EditProviderDialog({
       if (!provider) return;
 
       // 注意：values.settingsConfig 已经是最终的配置字符串
-      // ProviderForm 已经为不同的 app 类型（Claude/Codex/Gemini）正确组装了配置
+      // ProviderForm has already assembled the app-specific configuration.
       const parsedConfig = JSON.parse(values.settingsConfig) as Record<
         string,
         unknown
       >;
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw" || appId === "pi") &&
-        values.providerKey?.trim()
+        appId === "opencode" && values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
 
@@ -275,7 +250,6 @@ export function EditProviderDialog({
       isOpen={open}
       title={t("provider.editProvider")}
       onClose={handlePanelClose}
-      contentClassName={appId === "pi" ? "pb-0" : undefined}
       footer={
         <Button
           type="submit"

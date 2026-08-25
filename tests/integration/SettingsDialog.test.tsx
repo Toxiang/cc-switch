@@ -236,19 +236,19 @@ describe("SettingsPage integration", () => {
     fireEvent.click(resetButtons[0]);
     await waitFor(() => expect(appInput.value).toBe("/home/mock/.cc-switch"));
 
-    const claudeInput = (await screen.findByPlaceholderText(
-      "settings.browsePlaceholderClaude",
+    const codexInput = (await screen.findByPlaceholderText(
+      "settings.browsePlaceholderCodex",
     )) as HTMLInputElement;
-    fireEvent.change(claudeInput, { target: { value: "/custom/claude" } });
-    await waitFor(() => expect(claudeInput.value).toBe("/custom/claude"));
+    fireEvent.change(codexInput, { target: { value: "/custom/codex" } });
+    await waitFor(() => expect(codexInput.value).toBe("/custom/codex"));
 
     fireEvent.click(browseButtons[1]);
     await waitFor(() =>
-      expect(claudeInput.value).toBe("/custom/claude/picked"),
+      expect(codexInput.value).toBe("/custom/codex/picked"),
     );
 
     fireEvent.click(resetButtons[1]);
-    await waitFor(() => expect(claudeInput.value).toBe("/home/mock/.claude"));
+    await waitFor(() => expect(codexInput.value).toBe("/home/mock/.codex"));
   });
 
   it("notifies when export fails", async () => {

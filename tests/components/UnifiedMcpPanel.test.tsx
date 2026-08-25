@@ -208,15 +208,15 @@ describe("UnifiedMcpPanel", () => {
     mocks.serversMap = {
       visible: makeServer("visible", {
         name: "Visible Needle",
-        apps: { claude: false },
+        apps: { codex: false },
       }),
       "hidden-disabled": makeServer("hidden-disabled", {
         name: "Hidden Disabled",
-        apps: { claude: false },
+        apps: { codex: false },
       }),
       "hidden-enabled": makeServer("hidden-enabled", {
         name: "Hidden Enabled",
-        apps: { claude: true },
+        apps: { codex: true },
       }),
     };
     mocks.bulkToggle.mockResolvedValue({
@@ -239,7 +239,7 @@ describe("UnifiedMcpPanel", () => {
     await waitFor(() => {
       expect(mocks.bulkToggle).toHaveBeenCalledWith({
         serverIds: ["visible", "hidden-disabled"],
-        app: "claude",
+        app: "codex",
         enabled: true,
       });
     });
@@ -252,7 +252,7 @@ describe("UnifiedMcpPanel", () => {
     mocks.bulkPending = true;
     mocks.bulkVariables = {
       serverIds: ["server"],
-      app: "claude",
+      app: "codex",
       enabled: true,
     };
     const onInteractionBlockedChange = vi.fn();

@@ -4,6 +4,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { emitTauriEvent } from "../msw/tauriMocks";
 
+const toastErrorMock = vi.fn();
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 vi.mock("@/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
@@ -39,7 +49,7 @@ describe("DeepLinkImportDialog", () => {
       emitTauriEvent("deeplink-import", {
         version: "v1",
         resource: "provider",
-        app: "claude",
+        app: "codex",
         name: "Test Provider",
         homepage: "https://example.com",
         endpoint: "https://api.example.com",
@@ -74,7 +84,7 @@ describe("DeepLinkImportDialog", () => {
       emitTauriEvent("deeplink-import", {
         version: "v1",
         resource: "provider",
-        app: "claude",
+        app: "codex",
         name: "Token Only Provider",
         homepage: "https://example.com",
         endpoint: "https://api.example.com",
@@ -98,5 +108,23 @@ describe("DeepLinkImportDialog", () => {
       ),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("脚本代码")).not.toBeInTheDocument();
+  });
+
+  it("rejects provider imports for removed applications", async () => {
+    render(<DeepLinkImportDialog />, { wrapper: Wrapper });
+
+    act(() => {
+      emitTauriEvent("deeplink-import", {
+        version: "v1",
+        resource: "provider",
+        app: "claude",
+        name: "Unsupported Provider",
+      });
+    });
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalled();
+    });
+    expect(screen.queryByText("Unsupported Provider")).not.toBeInTheDocument();
   });
 });

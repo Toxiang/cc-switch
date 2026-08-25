@@ -103,7 +103,7 @@ describe("AddProviderDialog", () => {
       <AddProviderDialog
         open
         onOpenChange={handleOpenChange}
-        appId="claude"
+        appId="codex"
         onSubmit={handleSubmit}
       />,
     );
@@ -123,15 +123,14 @@ describe("AddProviderDialog", () => {
     expect(handleOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("在缺少自定义端点时回退到配置中的 baseUrl", async () => {
+  it("在缺少自定义端点时回退到 OpenCode 配置中的 baseUrl", async () => {
     const handleSubmit = vi.fn().mockResolvedValue(undefined);
 
     mockFormValues = {
       name: "Base URL Provider",
       websiteUrl: "",
       settingsConfig: JSON.stringify({
-        env: { ANTHROPIC_BASE_URL: "https://claude.base" },
-        config: {},
+        options: { baseURL: "https://opencode.base" },
       }),
     };
 
@@ -139,7 +138,7 @@ describe("AddProviderDialog", () => {
       <AddProviderDialog
         open
         onOpenChange={vi.fn()}
-        appId="claude"
+        appId="opencode"
         onSubmit={handleSubmit}
       />,
     );
@@ -154,8 +153,8 @@ describe("AddProviderDialog", () => {
 
     const submitted = handleSubmit.mock.calls[0][0];
     expect(submitted.meta?.custom_endpoints).toEqual({
-      "https://claude.base": {
-        url: "https://claude.base",
+      "https://opencode.base": {
+        url: "https://opencode.base",
         addedAt: expect.any(Number),
         lastUsed: undefined,
       },
@@ -238,7 +237,7 @@ describe("AddProviderDialog", () => {
     });
   });
 
-  it("新建 Grok Build 自定义供应商时不补默认 Grok 图标", async () => {
+  it("新建 OpenCode 自定义供应商时不补默认图标", async () => {
     const handleSubmit = vi.fn().mockResolvedValue(undefined);
 
     mockFormValues = {
@@ -247,17 +246,10 @@ describe("AddProviderDialog", () => {
       icon: "",
       iconColor: "",
       settingsConfig: JSON.stringify({
-        config: `[models]
-default = "grok-4.5"
-
-[model."grok-4.5"]
-model = "grok-4.5"
-base_url = "https://grok.example.com/v1"
-name = "tes 1"
-api_key = "secret"
-api_backend = "responses"
-context_window = 500000
-`,
+        options: {
+          baseURL: "https://opencode.example.com/v1",
+          apiKey: "secret",
+        },
       }),
     };
 
@@ -265,7 +257,7 @@ context_window = 500000
       <AddProviderDialog
         open
         onOpenChange={vi.fn()}
-        appId="grokbuild"
+        appId="opencode"
         onSubmit={handleSubmit}
       />,
     );
@@ -279,11 +271,11 @@ context_window = 500000
     expect(submitted.iconColor).toBeUndefined();
   });
 
-  it("Pi 添加供应商时仅提交供应商目录", async () => {
+  it("OpenCode 添加供应商时提交稳定的供应商键", async () => {
     const handleSubmit = vi.fn().mockResolvedValue(undefined);
     mockFormValues = {
-      name: "Pi Provider",
-      providerKey: "pi-provider",
+      name: "OpenCode Provider",
+      providerKey: "opencode-provider",
       websiteUrl: "",
       settingsConfig: JSON.stringify({
         baseUrl: "https://api.example.com/v1",
@@ -308,7 +300,7 @@ context_window = 500000
       <AddProviderDialog
         open
         onOpenChange={vi.fn()}
-        appId="pi"
+        appId="opencode"
         onSubmit={handleSubmit}
       />,
     );
@@ -316,18 +308,15 @@ context_window = 500000
     fireEvent.click(screen.getByRole("button", { name: "common.add" }));
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
     expect(handleSubmit.mock.calls[0][0]).toMatchObject({
-      providerKey: "pi-provider",
+      providerKey: "opencode-provider",
       meta: { isPartner: true },
     });
-    expect(handleSubmit.mock.calls[0][0]).not.toHaveProperty(
-      "piActivateModelId",
-    );
   });
 
-  it("重新打开 Pi 表单后忽略上一轮的就绪回调", async () => {
+  it("重新打开 OpenCode 表单后忽略上一轮的就绪回调", async () => {
     const props = {
       onOpenChange: vi.fn(),
-      appId: "pi" as const,
+      appId: "opencode" as const,
       onSubmit: vi.fn(),
     };
     const { rerender } = render(<AddProviderDialog open {...props} />);

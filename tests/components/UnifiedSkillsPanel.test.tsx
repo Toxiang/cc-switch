@@ -36,11 +36,11 @@ let skillUpdatesMock: SkillUpdateInfo[] = [];
 let checkUpdatesFetching = false;
 let toggleSkillAppPending = false;
 let toggleSkillAppVariables:
-  | { id: string; app: "claude"; enabled: boolean }
+  | { id: string; app: "codex"; enabled: boolean }
   | undefined;
 let bulkToggleSkillAppPending = false;
 let bulkToggleSkillAppVariables:
-  | { ids: string[]; app: "claude"; enabled: boolean }
+  | { ids: string[]; app: "codex"; enabled: boolean }
   | undefined;
 
 vi.mock("sonner", () => ({
@@ -88,8 +88,8 @@ vi.mock("@/hooks/useSkills", () => ({
       {
         directory: "shared-skill",
         name: "Shared Skill",
-        description: "Imported from Grok Build",
-        foundIn: ["grokbuild"],
+        description: "Imported from OpenCode",
+        foundIn: ["opencode"],
         path: "/tmp/shared-skill",
       },
     ],
@@ -147,7 +147,7 @@ const makeInstalledSkill = (
 };
 
 const renderPanel = () =>
-  render(<UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="claude" />);
+  render(<UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="codex" />);
 
 describe("UnifiedSkillsPanel", () => {
   beforeEach(() => {
@@ -165,8 +165,8 @@ describe("UnifiedSkillsPanel", () => {
         {
           directory: "shared-skill",
           name: "Shared Skill",
-          description: "Imported from Grok Build",
-          foundIn: ["grokbuild"],
+          description: "Imported from OpenCode",
+          foundIn: ["opencode"],
           path: "/tmp/shared-skill",
         },
       ],
@@ -200,7 +200,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -222,7 +222,7 @@ describe("UnifiedSkillsPanel", () => {
       expect(importSkillsMock).toHaveBeenCalledWith([
         {
           directory: "shared-skill",
-          apps: expect.objectContaining({ grokbuild: true }),
+          apps: expect.objectContaining({ opencode: true }),
         },
       ]);
     });
@@ -342,7 +342,7 @@ describe("UnifiedSkillsPanel", () => {
 
     installedSkillsMock = [makeInstalledSkill()];
     rerender(
-      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="claude" />,
+      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="codex" />,
     );
     const user = userEvent.setup();
     await user.type(
@@ -378,7 +378,7 @@ describe("UnifiedSkillsPanel", () => {
       makeInstalledSkill({
         id: "enabled-id",
         name: "Visible Skill",
-        apps: { claude: true },
+        apps: { codex: true },
       }),
       makeInstalledSkill({ id: "disabled-id-1", name: "Hidden Skill One" }),
       makeInstalledSkill({ id: "disabled-id-2", name: "Hidden Skill Two" }),
@@ -396,12 +396,12 @@ describe("UnifiedSkillsPanel", () => {
       }),
       "Visible Skill",
     );
-    await user.click(screen.getByText("Claude:").closest("button")!);
+    await user.click(screen.getByText("Codex:").closest("button")!);
 
     await waitFor(() => {
       expect(bulkToggleSkillAppMock).toHaveBeenCalledWith({
         ids: ["disabled-id-1", "disabled-id-2"],
-        app: "claude",
+        app: "codex",
         enabled: true,
       });
     });
@@ -415,12 +415,12 @@ describe("UnifiedSkillsPanel", () => {
     renderPanel();
 
     const user = userEvent.setup();
-    await user.click(screen.getByText("Claude:").closest("button")!);
+    await user.click(screen.getByText("Codex:").closest("button")!);
 
     await waitFor(() => {
       expect(bulkToggleSkillAppMock).toHaveBeenCalledWith({
         ids: ["first-id", "second-id"],
-        app: "claude",
+        app: "codex",
         enabled: true,
       });
     });
@@ -428,18 +428,18 @@ describe("UnifiedSkillsPanel", () => {
 
   it("disables all Skills when every Skill is enabled for an app", async () => {
     installedSkillsMock = [
-      makeInstalledSkill({ id: "first-id", apps: { claude: true } }),
-      makeInstalledSkill({ id: "second-id", apps: { claude: true } }),
+      makeInstalledSkill({ id: "first-id", apps: { codex: true } }),
+      makeInstalledSkill({ id: "second-id", apps: { codex: true } }),
     ];
     renderPanel();
 
     const user = userEvent.setup();
-    await user.click(screen.getByText("Claude:").closest("button")!);
+    await user.click(screen.getByText("Codex:").closest("button")!);
 
     await waitFor(() => {
       expect(bulkToggleSkillAppMock).toHaveBeenCalledWith({
         ids: ["first-id", "second-id"],
-        app: "claude",
+        app: "codex",
         enabled: false,
       });
     });
@@ -457,7 +457,7 @@ describe("UnifiedSkillsPanel", () => {
     renderPanel();
 
     const user = userEvent.setup();
-    await user.click(screen.getByText("Claude:").closest("button")!);
+    await user.click(screen.getByText("Codex:").closest("button")!);
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith("common.bulkToggleFailed", {
@@ -474,14 +474,14 @@ describe("UnifiedSkillsPanel", () => {
         toggleSkillAppPending = true;
         toggleSkillAppVariables = {
           id: "owner/repo:alpha-skill",
-          app: "claude",
+          app: "codex",
           enabled: true,
         };
       } else {
         bulkToggleSkillAppPending = true;
         bulkToggleSkillAppVariables = {
           ids: ["owner/repo:alpha-skill"],
-          app: "claude",
+          app: "codex",
           enabled: true,
         };
       }
@@ -492,7 +492,7 @@ describe("UnifiedSkillsPanel", () => {
         row!.querySelectorAll<HTMLButtonElement>("button"),
       ).slice(0, 7);
 
-      expect(appToggleButtons).toHaveLength(7);
+      expect(appToggleButtons).toHaveLength(3);
       appToggleButtons.forEach((button) => expect(button).toBeDisabled());
       expect(screen.getByTitle("skills.uninstall")).toBeDisabled();
       await userEvent.setup().click(appToggleButtons[0]);
@@ -507,7 +507,7 @@ describe("UnifiedSkillsPanel", () => {
     const { unmount } = render(
       <UnifiedSkillsPanel
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
         onCheckUpdatesStateChange={onCheckUpdatesStateChange}
       />,
     );
@@ -541,7 +541,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -578,7 +578,7 @@ describe("UnifiedSkillsPanel", () => {
       expect(onInteractionBlockedChange).toHaveBeenLastCalledWith(true);
       expect(onNavigationBlockedChange).toHaveBeenLastCalledWith(false);
     });
-    expect(screen.getByText("Claude:").closest("button")).toBeDisabled();
+    expect(screen.getByText("Codex:").closest("button")).toBeDisabled();
     expect(screen.getByTitle("skills.uninstall")).toBeDisabled();
 
     await act(async () => {
@@ -594,7 +594,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -626,7 +626,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -641,7 +641,7 @@ describe("UnifiedSkillsPanel", () => {
     await userEvent.setup().click(screen.getByTitle("skills.uninstall"));
     await userEvent
       .setup()
-      .click(screen.getByText("Claude:").closest("button")!);
+      .click(screen.getByText("Codex:").closest("button")!);
 
     expect(scanUnmanagedMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -696,7 +696,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -760,7 +760,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel
         ref={ref}
         onOpenDiscovery={() => {}}
-        currentApp="claude"
+        currentApp="codex"
       />,
     );
 
@@ -798,65 +798,69 @@ describe("UnifiedSkillsPanel", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("renders and toggles the Pi app state like the other apps", async () => {
+  it("renders and toggles the OpenCode app state", async () => {
     installedSkillsMock = [
       makeInstalledSkill({
         id: "skill-1",
-        name: "Pi Skill",
-        directory: "pi-skill",
-        apps: { pi: true },
+        name: "OpenCode Skill",
+        directory: "opencode-skill",
+        apps: { opencode: true },
       }),
     ];
 
-    render(<UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="pi" />);
+    render(
+      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="opencode" />,
+    );
 
-    const piToggle = screen.getByRole("button", { name: "Pi" });
-    expect(piToggle).toHaveAttribute("aria-pressed", "true");
+    const openCodeToggle = screen.getByRole("button", { name: "OpenCode" });
+    expect(openCodeToggle).toHaveAttribute("aria-pressed", "true");
 
-    await userEvent.setup().click(piToggle);
+    await userEvent.setup().click(openCodeToggle);
 
     await waitFor(() => {
       expect(toggleSkillAppMock).toHaveBeenCalledWith({
         id: "skill-1",
-        app: "pi",
+        app: "opencode",
         enabled: false,
       });
     });
   });
 
-  it("renders an inactive Pi state like the other apps", () => {
+  it("renders an inactive OpenCode state", () => {
     installedSkillsMock = [
       makeInstalledSkill({
         id: "skill-1",
-        name: "Claude Skill",
-        directory: "claude-skill",
-        apps: { claude: true, pi: false },
+        name: "Codex Skill",
+        directory: "codex-skill",
+        apps: { codex: true, opencode: false },
       }),
     ];
 
-    render(<UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="pi" />);
+    render(
+      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="opencode" />,
+    );
 
-    expect(screen.getByRole("button", { name: "Pi" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "OpenCode" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
   });
 
-  it("does not add an inactive Pi toggle outside the Pi context", () => {
+  it("does not render unsupported app toggles", () => {
     installedSkillsMock = [
       makeInstalledSkill({
-        name: "Claude Skill",
-        apps: { claude: true, pi: false },
+        name: "Codex Skill",
+        apps: { codex: true, pi: false },
       }),
     ];
 
     render(
-      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="claude" />,
+      <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="codex" />,
     );
 
     expect(
       screen.queryByRole("button", { name: "Pi" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Claude" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Codex" })).toBeInTheDocument();
   });
 });

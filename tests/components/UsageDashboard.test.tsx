@@ -124,25 +124,27 @@ describe("UsageDashboard", () => {
     expect(screen.getByTestId("select-5000")).toBeInTheDocument();
   });
 
-  it("filters usage queries to Pi", async () => {
+  it("filters usage queries to OpenCode", async () => {
     renderDashboard();
 
-    fireEvent.click(screen.getByRole("button", { name: "usage.appFilter.pi" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "usage.appFilter.opencode" }),
+    );
 
     await waitFor(() =>
       expect(useProviderStatsMock).toHaveBeenLastCalledWith(
         expect.anything(),
-        { appType: "pi" },
+        { appType: "opencode" },
         expect.anything(),
       ),
     );
     expect(useModelStatsMock).toHaveBeenLastCalledWith(
       expect.anything(),
-      { appType: "pi", providerName: undefined },
+      { appType: "opencode", providerName: undefined },
       expect.anything(),
     );
     expect(usageHeroMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ appType: "pi" }),
+      expect.objectContaining({ appType: "opencode" }),
     );
   });
 

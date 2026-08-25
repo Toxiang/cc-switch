@@ -199,14 +199,7 @@ export type AppType =
 
 export type AppTypeFilter = "all" | AppType;
 
-export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
-  "claude",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "pi",
-];
+export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = ["codex", "opencode"];
 
 /**
  * App types whose proxy uses an OpenAI-style protocol. Two consequences:

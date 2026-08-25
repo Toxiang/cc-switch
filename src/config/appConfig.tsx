@@ -16,40 +16,42 @@ export interface AppConfig {
   badgeClass: string;
 }
 
-export const APP_IDS: AppId[] = [
-  "claude",
-  "claude-desktop",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "openclaw",
-  "hermes",
-  "pi",
-];
+export const APP_IDS: AppId[] = ["codex", "opencode"];
 
 export const DEFAULT_VISIBLE_APPS: VisibleApps = {
-  claude: true,
-  "claude-desktop": true,
+  claude: false,
+  "claude-desktop": false,
   codex: true,
-  gemini: true,
-  grokbuild: true,
+  gemini: false,
+  grokbuild: false,
   opencode: true,
-  openclaw: true,
-  hermes: true,
-  pi: true,
+  openclaw: false,
+  hermes: false,
+  pi: false,
 };
 
+/**
+ * Restrict persisted visibility settings to this build's supported apps.
+ * Older installations may still carry enabled flags for removed apps.
+ */
+export function normalizeVisibleApps(
+  persisted?: Partial<VisibleApps>,
+): VisibleApps {
+  const normalized = { ...DEFAULT_VISIBLE_APPS };
+
+  for (const app of APP_IDS) {
+    normalized[app] = persisted?.[app] ?? DEFAULT_VISIBLE_APPS[app];
+  }
+
+  if (!APP_IDS.some((app) => normalized[app])) {
+    normalized.codex = true;
+  }
+
+  return normalized;
+}
+
 /** App IDs shown in Skills panels. */
-export const SKILLS_APP_IDS: AppId[] = [
-  "claude",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "hermes",
-  "pi",
-];
+export const SKILLS_APP_IDS: AppId[] = ["codex", "opencode"];
 
 export type ProxyAppId = Extract<
   AppId,
@@ -57,12 +59,7 @@ export type ProxyAppId = Extract<
 >;
 
 /** Apps with a complete local gateway + failover data plane. */
-export const PROXY_APP_IDS: ProxyAppId[] = [
-  "claude",
-  "codex",
-  "gemini",
-  "grokbuild",
-];
+export const PROXY_APP_IDS: ProxyAppId[] = ["codex"];
 
 export function isProxyAppId(appId: string): appId is ProxyAppId {
   return (PROXY_APP_IDS as string[]).includes(appId);
@@ -73,12 +70,7 @@ export type AdditiveAppId = Extract<
   "opencode" | "openclaw" | "hermes" | "pi"
 >;
 
-export const ADDITIVE_APP_IDS: AdditiveAppId[] = [
-  "opencode",
-  "openclaw",
-  "hermes",
-  "pi",
-];
+export const ADDITIVE_APP_IDS: AdditiveAppId[] = ["opencode"];
 
 export function isAdditiveAppId(appId: string): appId is AdditiveAppId {
   return (ADDITIVE_APP_IDS as string[]).includes(appId);
@@ -86,14 +78,7 @@ export function isAdditiveAppId(appId: string): appId is AdditiveAppId {
 
 /** Pi has no native MCP registry; do not manufacture a disabled mirror. */
 export type McpAppId = Exclude<AppId, "claude-desktop" | "openclaw" | "pi">;
-export const MCP_APP_IDS: McpAppId[] = [
-  "claude",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "hermes",
-];
+export const MCP_APP_IDS: McpAppId[] = ["codex", "opencode"];
 
 export function isMcpAppId(appId: string): appId is McpAppId {
   return (MCP_APP_IDS as string[]).includes(appId);

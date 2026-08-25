@@ -7,7 +7,7 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type { VisibleApps } from "@/types";
 import type { AppId } from "@/lib/api";
-import { DEFAULT_VISIBLE_APPS } from "@/config/appConfig";
+import { normalizeVisibleApps } from "@/config/appConfig";
 
 interface AppVisibilitySettingsProps {
   settings: SettingsFormState;
@@ -19,19 +19,8 @@ const APP_CONFIG: Array<{
   icon: string;
   nameKey: string;
 }> = [
-  { id: "claude", icon: "claude", nameKey: "apps.claudeCode" },
-  {
-    id: "claude-desktop",
-    icon: "claude",
-    nameKey: "apps.claudeDesktop",
-  },
   { id: "codex", icon: "openai", nameKey: "apps.codex" },
-  { id: "gemini", icon: "gemini", nameKey: "apps.gemini" },
-  { id: "grokbuild", icon: "grok", nameKey: "apps.grokbuild" },
   { id: "opencode", icon: "opencode", nameKey: "apps.opencode" },
-  { id: "openclaw", icon: "openclaw", nameKey: "apps.openclaw" },
-  { id: "hermes", icon: "hermes", nameKey: "apps.hermes" },
-  { id: "pi", icon: "pi", nameKey: "apps.pi" },
 ];
 
 export function AppVisibilitySettings({
@@ -40,10 +29,10 @@ export function AppVisibilitySettings({
 }: AppVisibilitySettingsProps) {
   const { t } = useTranslation();
 
-  const visibleApps: VisibleApps = settings.visibleApps ?? DEFAULT_VISIBLE_APPS;
+  const visibleApps: VisibleApps = normalizeVisibleApps(settings.visibleApps);
 
   // Count how many apps are currently visible
-  const visibleCount = Object.values(visibleApps).filter(Boolean).length;
+  const visibleCount = APP_CONFIG.filter((app) => visibleApps[app.id]).length;
 
   const handleToggle = (appId: AppId) => {
     const isCurrentlyVisible = visibleApps[appId];
