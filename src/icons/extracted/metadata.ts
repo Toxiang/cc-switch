@@ -2,6 +2,13 @@
 import { IconMetadata } from "@/types/icon";
 
 export const iconMetadata: Record<string, IconMetadata> = {
+  workbuddy: {
+    name: "workbuddy",
+    displayName: "WorkBuddy",
+    category: "ai-provider",
+    keywords: ["workbuddy", "work buddy", "coding", "agent"],
+    defaultColor: "#12C6A6",
+  },
   a6api: {
     name: "a6api",
     displayName: "A6API",

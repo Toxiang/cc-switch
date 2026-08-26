@@ -1178,6 +1178,12 @@ impl RequestForwarder {
             && super::providers::should_convert_codex_responses_to_chat(provider, endpoint);
         let codex_responses_to_anthropic = matches!(app_type, AppType::Codex | AppType::GrokBuild)
             && super::providers::should_convert_codex_responses_to_anthropic(provider, endpoint);
+        let workbuddy_chat_to_responses = matches!(app_type, AppType::WorkBuddy)
+            && !super::providers::codex_provider_uses_chat_completions(provider)
+            && matches!(
+                split_endpoint_and_query(endpoint).0,
+                "/chat/completions" | "/v1/chat/completions"
+            );
         let codex_official_auth_passthrough = matches!(app_type, AppType::Codex)
             && super::providers::is_codex_official_provider(provider);
 
@@ -1395,7 +1401,9 @@ impl RequestForwarder {
                 .as_ref()
                 .and_then(|meta| meta.impersonate_claude_code)
                 == Some(true);
-        let (effective_endpoint, passthrough_query) = if codex_responses_to_chat {
+        let (effective_endpoint, passthrough_query) = if workbuddy_chat_to_responses {
+            rewrite_workbuddy_chat_endpoint_to_responses(endpoint)
+        } else if codex_responses_to_chat {
             rewrite_codex_responses_endpoint_to_chat(endpoint)
         } else if codex_responses_to_anthropic {
             rewrite_codex_responses_endpoint_to_anthropic(endpoint)
@@ -1423,6 +1431,8 @@ impl RequestForwarder {
         // exact endpoint suffix, so prefixed gateways like `.../api/v1/messages` are covered.
         let codex_anthropic_base_is_full_endpoint =
             codex_responses_to_anthropic && base_url_is_full_endpoint(&base_url, "/v1/messages");
+        let workbuddy_responses_base_is_full_endpoint =
+            workbuddy_chat_to_responses && base_url_is_full_endpoint(&base_url, "/responses");
 
         let is_codex_alpha_search = matches!(app_type, AppType::Codex)
             && split_endpoint_and_query(&effective_endpoint).0 == "/alpha/search";
@@ -1438,6 +1448,7 @@ impl RequestForwarder {
         } else if is_full_url
             || codex_chat_base_is_full_endpoint
             || codex_anthropic_base_is_full_endpoint
+            || workbuddy_responses_base_is_full_endpoint
         {
             append_query_to_full_url(&base_url, passthrough_query.as_deref())
         } else {
@@ -1458,7 +1469,12 @@ impl RequestForwarder {
         let mut codex_anthropic_one_m = false;
 
         // 转换请求体（如果需要）
-        let mut request_body = if codex_responses_to_chat {
+        let mut request_body = if workbuddy_chat_to_responses {
+            let mut responses_body =
+                super::providers::workbuddy::chat_request_to_responses(mapped_body)?;
+            super::providers::apply_codex_upstream_model(provider, &mut responses_body);
+            responses_body
+        } else if codex_responses_to_chat {
             let mut mapped_body = mapped_body;
             let explicit_prompt_cache_key = mapped_body
                 .get("prompt_cache_key")
@@ -1606,7 +1622,10 @@ impl RequestForwarder {
             );
         }
 
-        if matches!(app_type, AppType::Codex | AppType::GrokBuild) {
+        if matches!(
+            app_type,
+            AppType::Codex | AppType::WorkBuddy | AppType::GrokBuild
+        ) {
             self.apply_media_prevention(&mut request_body, provider);
         }
 
@@ -2887,6 +2906,18 @@ fn rewrite_codex_responses_endpoint_to_chat(endpoint: &str) -> (String, Option<S
     let (_path, query) = split_endpoint_and_query(endpoint);
     let passthrough_query = query.map(ToString::to_string);
     let target_path = "/chat/completions";
+    let rewritten = match passthrough_query.as_deref() {
+        Some(query) if !query.is_empty() => format!("{target_path}?{query}"),
+        _ => target_path.to_string(),
+    };
+
+    (rewritten, passthrough_query)
+}
+
+fn rewrite_workbuddy_chat_endpoint_to_responses(endpoint: &str) -> (String, Option<String>) {
+    let (_path, query) = split_endpoint_and_query(endpoint);
+    let passthrough_query = query.map(ToString::to_string);
+    let target_path = "/responses";
     let rewritten = match passthrough_query.as_deref() {
         Some(query) if !query.is_empty() => format!("{target_path}?{query}"),
         _ => target_path.to_string(),

@@ -250,6 +250,60 @@ describe("EditProviderDialog", () => {
     ).toEqual(provider.settingsConfig);
   });
 
+  it("uses the WorkBuddy database config instead of treating models.json as a live provider snapshot", async () => {
+    const provider: Provider = {
+      id: "default",
+      name: "krill",
+      category: "custom",
+      settingsConfig: {
+        auth: {
+          OPENAI_API_KEY: "db-key",
+        },
+        config:
+          'base_url = "https://api.example.com/codex/v1"\n\nmodel = "gpt-test"\nwire_api = "responses"',
+      },
+      meta: {
+        commonConfigEnabled: false,
+        endpointAutoSelect: true,
+        apiFormat: "openai_responses",
+      },
+    };
+    const handleSubmit = vi.fn().mockResolvedValue(undefined);
+
+    apiMocks.getCurrent.mockResolvedValue(provider.id);
+    apiMocks.getLiveProviderSettings.mockResolvedValue([
+      {
+        model: "cc-switch-workbuddy",
+        baseUrl: "http://127.0.0.1:15721/v1",
+      },
+    ]);
+
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSubmit={handleSubmit}
+        appId="workbuddy"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
+      ).toEqual(provider.settingsConfig);
+    });
+    expect(apiMocks.getCurrent).not.toHaveBeenCalled();
+    expect(apiMocks.getLiveProviderSettings).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
+    expect(handleSubmit.mock.calls[0][0].provider.settingsConfig).toEqual(
+      provider.settingsConfig,
+    );
+  });
+
   it("clears the nested auth panel before the dialog reopens", async () => {
     const provider: Provider = {
       id: "official",

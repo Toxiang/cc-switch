@@ -112,6 +112,7 @@ pub struct ProxyServerInfo {
 pub struct ProxyTakeoverStatus {
     pub claude: bool,
     pub codex: bool,
+    pub workbuddy: bool,
     pub gemini: bool,
     pub grokbuild: bool,
     pub opencode: bool,

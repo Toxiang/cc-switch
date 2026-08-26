@@ -16,12 +16,13 @@ export interface AppConfig {
   badgeClass: string;
 }
 
-export const APP_IDS: AppId[] = ["codex", "opencode"];
+export const APP_IDS: AppId[] = ["codex", "opencode", "workbuddy"];
 
 export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   claude: false,
   "claude-desktop": false,
   codex: true,
+  workbuddy: true,
   gemini: false,
   grokbuild: false,
   opencode: true,
@@ -51,15 +52,20 @@ export function normalizeVisibleApps(
 }
 
 /** App IDs shown in Skills panels. */
-export const SKILLS_APP_IDS: AppId[] = ["codex", "opencode"];
+export type SkillAppId = Extract<AppId, "codex" | "opencode">;
+export const SKILLS_APP_IDS: SkillAppId[] = ["codex", "opencode"];
+
+export function isSkillAppId(appId: string): appId is SkillAppId {
+  return (SKILLS_APP_IDS as string[]).includes(appId);
+}
 
 export type ProxyAppId = Extract<
   AppId,
-  "claude" | "codex" | "gemini" | "grokbuild"
+  "claude" | "codex" | "workbuddy" | "gemini" | "grokbuild"
 >;
 
 /** Apps with a complete local gateway + failover data plane. */
-export const PROXY_APP_IDS: ProxyAppId[] = ["codex"];
+export const PROXY_APP_IDS: ProxyAppId[] = ["codex", "workbuddy"];
 
 export function isProxyAppId(appId: string): appId is ProxyAppId {
   return (PROXY_APP_IDS as string[]).includes(appId);
@@ -77,7 +83,10 @@ export function isAdditiveAppId(appId: string): appId is AdditiveAppId {
 }
 
 /** Pi has no native MCP registry; do not manufacture a disabled mirror. */
-export type McpAppId = Exclude<AppId, "claude-desktop" | "openclaw" | "pi">;
+export type McpAppId = Exclude<
+  AppId,
+  "claude-desktop" | "workbuddy" | "openclaw" | "pi"
+>;
 export const MCP_APP_IDS: McpAppId[] = ["codex", "opencode"];
 
 export function isMcpAppId(appId: string): appId is McpAppId {
@@ -108,6 +117,14 @@ export const APP_ICON_MAP: Record<AppId, AppConfig> = {
       "bg-green-500/10 ring-1 ring-green-500/20 hover:bg-green-500/20 text-green-600 dark:text-green-400",
     badgeClass:
       "bg-green-500/10 text-green-700 dark:text-green-300 hover:bg-green-500/20 border-0 gap-1.5",
+  },
+  workbuddy: {
+    label: "WorkBuddy",
+    icon: <ProviderIcon icon="workbuddy" name="WorkBuddy" size={14} />,
+    activeClass:
+      "bg-sky-500/10 ring-1 ring-sky-500/20 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400",
+    badgeClass:
+      "bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 border-0 gap-1.5",
   },
   gemini: {
     label: "Gemini",

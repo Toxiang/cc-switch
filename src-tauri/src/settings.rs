@@ -37,6 +37,8 @@ pub struct VisibleApps {
     #[serde(default = "default_true")]
     pub codex: bool,
     #[serde(default = "default_true")]
+    pub workbuddy: bool,
+    #[serde(default = "default_true")]
     pub gemini: bool,
     #[serde(default = "default_true")]
     pub grokbuild: bool,
@@ -56,6 +58,7 @@ impl Default for VisibleApps {
             claude: true,
             claude_desktop: true,
             codex: true,
+            workbuddy: true,
             gemini: true,
             grokbuild: true,
             opencode: true,
@@ -73,6 +76,7 @@ impl VisibleApps {
             AppType::Claude => self.claude,
             AppType::ClaudeDesktop => self.claude_desktop,
             AppType::Codex => self.codex,
+            AppType::WorkBuddy => self.workbuddy,
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
@@ -439,6 +443,9 @@ pub struct AppSettings {
     /// 当前 Codex 供应商 ID（本地存储，优先于数据库 is_current）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_provider_codex: Option<String>,
+    /// 当前 WorkBuddy 供应商 ID
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_provider_workbuddy: Option<String>,
     /// 当前 Gemini 供应商 ID（本地存储，优先于数据库 is_current）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_provider_gemini: Option<String>,
@@ -543,6 +550,7 @@ impl Default for AppSettings {
             current_provider_claude: None,
             current_provider_claude_desktop: None,
             current_provider_codex: None,
+            current_provider_workbuddy: None,
             current_provider_gemini: None,
             current_provider_grokbuild: None,
             current_provider_opencode: None,
@@ -994,6 +1002,7 @@ pub fn get_current_provider(app_type: &AppType) -> Option<String> {
         AppType::Claude => settings.current_provider_claude.clone(),
         AppType::ClaudeDesktop => settings.current_provider_claude_desktop.clone(),
         AppType::Codex => settings.current_provider_codex.clone(),
+        AppType::WorkBuddy => settings.current_provider_workbuddy.clone(),
         AppType::Gemini => settings.current_provider_gemini.clone(),
         AppType::GrokBuild => settings.current_provider_grokbuild.clone(),
         AppType::OpenCode => settings.current_provider_opencode.clone(),
@@ -1013,6 +1022,7 @@ pub fn set_current_provider(app_type: &AppType, id: Option<&str>) -> Result<(), 
         AppType::Claude => settings.current_provider_claude = id_owned.clone(),
         AppType::ClaudeDesktop => settings.current_provider_claude_desktop = id_owned.clone(),
         AppType::Codex => settings.current_provider_codex = id_owned.clone(),
+        AppType::WorkBuddy => settings.current_provider_workbuddy = id_owned.clone(),
         AppType::Gemini => settings.current_provider_gemini = id_owned.clone(),
         AppType::GrokBuild => settings.current_provider_grokbuild = id_owned.clone(),
         AppType::OpenCode => settings.current_provider_opencode = id_owned.clone(),

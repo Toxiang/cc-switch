@@ -103,7 +103,7 @@ export function AddProviderDialog({
           if (url.startsWith("http")) urlSet.add(url);
         };
 
-        if (appId === "codex" && values.presetId) {
+        if ((appId === "codex" || appId === "workbuddy") && values.presetId) {
           const presetIndex = Number.parseInt(
             values.presetId.replace("codex-", ""),
             10,
@@ -112,7 +112,7 @@ export function AddProviderDialog({
           preset?.endpointCandidates?.forEach(addUrl);
         }
 
-        if (appId === "codex") {
+        if (appId === "codex" || appId === "workbuddy") {
           const config = parsedConfig.config as string | undefined;
           if (config) addUrl(extractCodexBaseUrl(config));
         } else if (appId === "opencode") {

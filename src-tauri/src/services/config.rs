@@ -87,6 +87,7 @@ impl ConfigService {
     pub fn sync_current_providers_to_live(config: &mut MultiAppConfig) -> Result<(), AppError> {
         Self::sync_current_provider_for_app(config, &AppType::Claude)?;
         Self::sync_current_provider_for_app(config, &AppType::Codex)?;
+        Self::sync_current_provider_for_app(config, &AppType::WorkBuddy)?;
         Self::sync_current_provider_for_app(config, &AppType::Gemini)?;
         Self::sync_current_provider_for_app(config, &AppType::GrokBuild)?;
         Ok(())
@@ -121,6 +122,10 @@ impl ConfigService {
 
         match app_type {
             AppType::Codex => Self::sync_codex_live(config, &current_id, &provider)?,
+            AppType::WorkBuddy => {
+                // WorkBuddy live projection is owned by ProxyService because its
+                // managed Chat endpoint is meaningful only while the proxy runs.
+            }
             AppType::Claude => Self::sync_claude_live(config, &current_id, &provider)?,
             AppType::ClaudeDesktop => {
                 // Claude Desktop 3P profiles are managed by claude_desktop_config.

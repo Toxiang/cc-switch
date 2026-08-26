@@ -29,6 +29,7 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
     claude: "CLAUDE.md",
     "claude-desktop": "CLAUDE.md",
     codex: "AGENTS.md",
+    workbuddy: "AGENTS.md",
     gemini: "GEMINI.md",
     grokbuild: "AGENTS.md",
     opencode: "AGENTS.md",

@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
 import { toast } from "sonner";
-import { SKILLS_APP_IDS } from "@/config/appConfig";
+import { isSkillAppId, SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
 import { AppToggleGroup } from "@/components/common/AppToggleGroup";
 import { ListItemRow } from "@/components/common/ListItemRow";
@@ -49,7 +49,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS.filter((app) => app !== "pi");
+const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS;
 
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
@@ -129,8 +129,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   } = useCheckSkillUpdates();
   const updateSkillMutation = useUpdateSkill();
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
-  const visibleSkillAppIds =
-    currentApp === "pi" ? SKILLS_APP_IDS : IMPORT_SKILLS_APP_IDS;
+  const visibleSkillAppIds = IMPORT_SKILLS_APP_IDS;
 
   const mutationPending =
     deleteBackupMutation.isPending ||
@@ -266,6 +265,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       : null;
 
   const handleToggleApp = async (id: string, app: AppId, enabled: boolean) => {
+    if (!isSkillAppId(app)) return;
     if (!beginWrite()) return;
 
     try {
@@ -278,6 +278,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   const handleToggleAll = async (app: AppId, enabled: boolean) => {
+    if (!isSkillAppId(app)) return;
     if (!skills || !beginWrite()) return;
 
     const ids = skills

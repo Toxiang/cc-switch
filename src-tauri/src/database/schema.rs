@@ -4,7 +4,7 @@
 
 use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::error::AppError;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -124,7 +124,7 @@ impl Database {
 
         // 8. Proxy Config 表（三行结构，app_type 主键）
         conn.execute("CREATE TABLE IF NOT EXISTS proxy_config (
-            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild','workbuddy')),
             proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
             listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
             enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
@@ -143,13 +143,24 @@ impl Database {
         // 兼容旧数据库：
         // - 老版本 proxy_config 是单例表（没有 app_type 列），此时不能执行三行 seed insert；
         // - 旧表会在 apply_schema_migrations() 中迁移为三行结构后再插入。
-        if Self::has_column(conn, "proxy_config", "app_type")? {
+        if Self::has_column(conn, "proxy_config", "app_type")?
+            && Self::proxy_config_supports_workbuddy(conn)?
+        {
             conn.execute(
                 "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
                 streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                 circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                 circuit_error_rate_threshold, circuit_min_requests)
                 VALUES ('claude', 6, 90, 180, 600, 8, 3, 90, 0.7, 15)",
+                [],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            conn.execute(
+                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests)
+                VALUES ('workbuddy', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
                 [],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -536,6 +547,11 @@ impl Database {
                         Self::migrate_v16_to_v17(conn)?;
                         Self::set_user_version(conn, 17)?;
                     }
+                    17 => {
+                        log::info!("Migrating database from v17 to v18 (add WorkBuddy proxy configuration)");
+                        Self::migrate_v17_to_v18(conn)?;
+                        Self::set_user_version(conn, 18)?;
+                    }
                     _ => {
                         return Err(AppError::Database(format!(
                             "未知的数据库版本 {version}，无法迁移到 {SCHEMA_VERSION}"
@@ -867,7 +883,7 @@ impl Database {
         // 创建新表
         conn.execute("DROP TABLE IF EXISTS proxy_config_new", [])?;
         conn.execute("CREATE TABLE proxy_config_new (
-            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild','workbuddy')),
             proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
             listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
             enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
@@ -1429,7 +1445,7 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
             "CREATE TABLE proxy_config_v14 (
-                app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+                app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild','workbuddy')),
                 proxy_enabled INTEGER NOT NULL DEFAULT 0,
                 listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
                 listen_port INTEGER NOT NULL DEFAULT 15721,
@@ -1562,6 +1578,95 @@ impl Database {
              ON session_usage_dedup(data_source, semantic_id, has_entry_id);",
         )
         .map_err(|error| AppError::Database(format!("创建会话用量去重账本失败: {error}")))?;
+        Ok(())
+    }
+
+    /// v17 -> v18: allow WorkBuddy to own an independent proxy row while
+    /// preserving every existing per-application proxy setting.
+    fn migrate_v17_to_v18(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "proxy_config")? {
+            return Ok(());
+        }
+
+        conn.execute("DROP TABLE IF EXISTS proxy_config_v18", [])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE proxy_config_v18 (
+                app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild','workbuddy')),
+                proxy_enabled INTEGER NOT NULL DEFAULT 0,
+                listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+                listen_port INTEGER NOT NULL DEFAULT 15721,
+                enable_logging INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
+                streaming_idle_timeout INTEGER NOT NULL DEFAULT 120,
+                non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
+                circuit_failure_threshold INTEGER NOT NULL DEFAULT 4,
+                circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
+                circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60,
+                circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
+                circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+                default_cost_multiplier TEXT NOT NULL DEFAULT '1',
+                pricing_model_source TEXT NOT NULL DEFAULT 'response',
+                live_takeover_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        conn.execute(
+            "INSERT INTO proxy_config_v18 (
+                app_type, proxy_enabled, listen_address, listen_port, enable_logging,
+                enabled, auto_failover_enabled, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests,
+                default_cost_multiplier, pricing_model_source, live_takeover_active,
+                created_at, updated_at
+            )
+            SELECT
+                app_type, proxy_enabled, listen_address, listen_port, enable_logging,
+                enabled, auto_failover_enabled, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests,
+                default_cost_multiplier, pricing_model_source, live_takeover_active,
+                created_at, updated_at
+            FROM proxy_config",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // Listener settings are shared in practice, so inherit the common
+        // values from Claude. WorkBuddy-specific takeover remains disabled.
+        conn.execute(
+            "INSERT OR IGNORE INTO proxy_config_v18 (
+                app_type, proxy_enabled, listen_address, listen_port, enable_logging,
+                max_retries, streaming_first_byte_timeout, streaming_idle_timeout,
+                non_streaming_timeout, circuit_failure_threshold, circuit_success_threshold,
+                circuit_timeout_seconds, circuit_error_rate_threshold, circuit_min_requests
+            )
+            SELECT
+                'workbuddy', proxy_enabled, listen_address, listen_port, enable_logging,
+                3, 60, 120, 600, 4, 2, 60, 0.6, 10
+            FROM proxy_config_v18 WHERE app_type = 'claude' LIMIT 1",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO proxy_config_v18 (app_type) VALUES ('workbuddy')",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        conn.execute("DROP TABLE proxy_config", [])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute("ALTER TABLE proxy_config_v18 RENAME TO proxy_config", [])
+            .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -3180,6 +3285,18 @@ impl Database {
         Ok(false)
     }
 
+    fn proxy_config_supports_workbuddy(conn: &Connection) -> Result<bool, AppError> {
+        let create_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proxy_config'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(create_sql.is_some_and(|sql| sql.contains("'workbuddy'")))
+    }
+
     pub(crate) fn has_column(
         conn: &Connection,
         table: &str,
@@ -3407,6 +3524,123 @@ mod tests {
              VALUES ('pi_session', 'request', 'semantic', 1)",
             [],
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn new_database_seeds_workbuddy_proxy_config() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+
+        let app_types: Vec<String> = conn
+            .prepare("SELECT app_type FROM proxy_config ORDER BY app_type")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            app_types,
+            vec!["claude", "codex", "gemini", "grokbuild", "workbuddy"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_v17_to_v18_adds_workbuddy_and_preserves_proxy_values() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE proxy_config (
+                app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+                proxy_enabled INTEGER NOT NULL DEFAULT 0,
+                listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+                listen_port INTEGER NOT NULL DEFAULT 15721,
+                enable_logging INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 3,
+                streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
+                streaming_idle_timeout INTEGER NOT NULL DEFAULT 120,
+                non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
+                circuit_failure_threshold INTEGER NOT NULL DEFAULT 4,
+                circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
+                circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60,
+                circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
+                circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+                default_cost_multiplier TEXT NOT NULL DEFAULT '1',
+                pricing_model_source TEXT NOT NULL DEFAULT 'response',
+                live_takeover_active INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO proxy_config (
+                app_type, proxy_enabled, listen_address, listen_port, enable_logging,
+                enabled, auto_failover_enabled, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests,
+                default_cost_multiplier, pricing_model_source, live_takeover_active,
+                created_at, updated_at
+            ) VALUES
+                ('claude', 1, '0.0.0.0', 18888, 0, 1, 1, 8, 91, 181, 601, 9, 4, 92, 0.75, 16, '1.2', 'request', 1, 'old-created', 'old-updated'),
+                ('codex', 1, '127.0.0.2', 17777, 1, 1, 0, 11, 62, 122, 602, 5, 3, 61, 0.65, 12, '1.5', 'response', 0, 'codex-created', 'codex-updated'),
+                ('gemini', 0, '127.0.0.3', 16666, 1, 0, 1, 7, 63, 123, 603, 6, 3, 62, 0.66, 13, '1.6', 'request', 0, 'gemini-created', 'gemini-updated'),
+                ('grokbuild', 0, '127.0.0.4', 15555, 1, 1, 1, 9, 64, 124, 604, 7, 3, 63, 0.67, 14, '1.7', 'response', 1, 'grok-created', 'grok-updated');",
+        )?;
+        Database::set_user_version(&conn, 17)?;
+
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, 18);
+        let row_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM proxy_config", [], |row| row.get(0))?;
+        assert_eq!(row_count, 5);
+        let codex: (i64, String, i64, i64, String, String, i64) = conn.query_row(
+            "SELECT proxy_enabled, listen_address, listen_port, max_retries,
+                    default_cost_multiplier, pricing_model_source, live_takeover_active
+             FROM proxy_config WHERE app_type = 'codex'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )?;
+        assert_eq!(
+            codex,
+            (
+                1,
+                "127.0.0.2".to_string(),
+                17777,
+                11,
+                "1.5".to_string(),
+                "response".to_string(),
+                0
+            )
+        );
+        let workbuddy: (i64, String, i64, i64, i64, i64) = conn.query_row(
+            "SELECT proxy_enabled, listen_address, listen_port, enabled,
+                    max_retries, streaming_first_byte_timeout
+             FROM proxy_config WHERE app_type = 'workbuddy'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )?;
+        assert_eq!(workbuddy, (1, "0.0.0.0".to_string(), 18888, 0, 3, 60));
+        assert!(conn
+            .execute("INSERT INTO proxy_config (app_type) VALUES ('invalid')", [])
+            .is_err());
         Ok(())
     }
 }

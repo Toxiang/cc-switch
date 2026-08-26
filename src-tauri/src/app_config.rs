@@ -27,6 +27,7 @@ impl McpApps {
         match app {
             AppType::Claude => self.claude,
             AppType::Codex => self.codex,
+            AppType::WorkBuddy => false,
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
@@ -42,6 +43,7 @@ impl McpApps {
         match app {
             AppType::Claude => self.claude = enabled,
             AppType::Codex => self.codex = enabled,
+            AppType::WorkBuddy => {}
             AppType::Gemini => self.gemini = enabled,
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
@@ -112,6 +114,7 @@ impl SkillApps {
         match app {
             AppType::Claude => self.claude,
             AppType::Codex => self.codex,
+            AppType::WorkBuddy => false,
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
@@ -127,6 +130,7 @@ impl SkillApps {
         match app {
             AppType::Claude => self.claude = enabled,
             AppType::Codex => self.codex = enabled,
+            AppType::WorkBuddy => {}
             AppType::Gemini => self.gemini = enabled,
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
@@ -386,6 +390,7 @@ pub enum AppType {
     )]
     ClaudeDesktop,
     Codex,
+    WorkBuddy,
     Gemini,
     GrokBuild,
     OpenCode,
@@ -400,6 +405,7 @@ impl AppType {
             AppType::Claude => "claude",
             AppType::ClaudeDesktop => "claude-desktop",
             AppType::Codex => "codex",
+            AppType::WorkBuddy => "workbuddy",
             AppType::Gemini => "gemini",
             AppType::GrokBuild => "grokbuild",
             AppType::OpenCode => "opencode",
@@ -424,7 +430,11 @@ impl AppType {
     pub fn supports_local_proxy(&self) -> bool {
         matches!(
             self,
-            AppType::Claude | AppType::Codex | AppType::Gemini | AppType::GrokBuild
+            AppType::Claude
+                | AppType::Codex
+                | AppType::WorkBuddy
+                | AppType::Gemini
+                | AppType::GrokBuild
         )
     }
 
@@ -434,6 +444,7 @@ impl AppType {
             AppType::Claude,
             AppType::ClaudeDesktop,
             AppType::Codex,
+            AppType::WorkBuddy,
             AppType::Gemini,
             AppType::GrokBuild,
             AppType::OpenCode,
@@ -454,6 +465,7 @@ impl FromStr for AppType {
             "claude" => Ok(AppType::Claude),
             "claude-desktop" | "claude_desktop" | "claudedesktop" => Ok(AppType::ClaudeDesktop),
             "codex" => Ok(AppType::Codex),
+            "workbuddy" | "work-buddy" | "work_buddy" => Ok(AppType::WorkBuddy),
             "gemini" => Ok(AppType::Gemini),
             "grokbuild" | "grok-build" | "grok_build" | "grok" => Ok(AppType::GrokBuild),
             "opencode" => Ok(AppType::OpenCode),
@@ -463,7 +475,7 @@ impl FromStr for AppType {
             other => Err(AppError::localized(
                 "unsupported_app",
                 format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi。"),
-                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi."),
+                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, workbuddy, gemini, grokbuild, opencode, openclaw, hermes, pi."),
             )),
         }
     }
@@ -477,6 +489,9 @@ pub struct CommonConfigSnippets {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workbuddy: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gemini: Option<String>,
@@ -498,6 +513,7 @@ impl CommonConfigSnippets {
             AppType::Claude => self.claude.as_ref(),
             AppType::ClaudeDesktop => None,
             AppType::Codex => self.codex.as_ref(),
+            AppType::WorkBuddy => self.workbuddy.as_ref(),
             AppType::Gemini => self.gemini.as_ref(),
             AppType::GrokBuild => None,
             AppType::OpenCode => self.opencode.as_ref(),
@@ -513,6 +529,7 @@ impl CommonConfigSnippets {
             AppType::Claude => self.claude = snippet,
             AppType::ClaudeDesktop => {}
             AppType::Codex => self.codex = snippet,
+            AppType::WorkBuddy => self.workbuddy = snippet,
             AppType::Gemini => self.gemini = snippet,
             AppType::GrokBuild => {}
             AppType::OpenCode => self.opencode = snippet,
@@ -558,6 +575,7 @@ impl Default for MultiAppConfig {
         apps.insert("claude".to_string(), ProviderManager::default());
         apps.insert("claude-desktop".to_string(), ProviderManager::default());
         apps.insert("codex".to_string(), ProviderManager::default());
+        apps.insert("workbuddy".to_string(), ProviderManager::default());
         apps.insert("gemini".to_string(), ProviderManager::default());
         apps.insert("grokbuild".to_string(), ProviderManager::default());
         apps.insert("opencode".to_string(), ProviderManager::default());
@@ -837,6 +855,7 @@ impl MultiAppConfig {
             AppType::Claude => &mut config.prompts.claude.prompts,
             AppType::ClaudeDesktop => &mut config.prompts.claude_desktop.prompts,
             AppType::Codex => &mut config.prompts.codex.prompts,
+            AppType::WorkBuddy => return Ok(false),
             AppType::Gemini => &mut config.prompts.gemini.prompts,
             AppType::GrokBuild => &mut config.prompts.grokbuild.prompts,
             AppType::OpenCode => &mut config.prompts.opencode.prompts,
@@ -883,6 +902,7 @@ impl MultiAppConfig {
                 AppType::Claude => &self.mcp.claude.servers,
                 AppType::ClaudeDesktop => continue, // Claude Desktop 3P profiles don't use MCP here
                 AppType::Codex => &self.mcp.codex.servers,
+                AppType::WorkBuddy => continue,
                 AppType::Gemini => &self.mcp.gemini.servers,
                 AppType::GrokBuild => continue,
                 AppType::OpenCode => &self.mcp.opencode.servers,

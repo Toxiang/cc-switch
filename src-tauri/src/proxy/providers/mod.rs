@@ -38,6 +38,7 @@ pub mod transform_codex_responses_namespace;
 pub mod transform_codex_responses_xai_sanitize;
 pub mod transform_gemini;
 pub mod transform_responses;
+pub mod workbuddy;
 pub mod xai_oauth_auth;
 
 use crate::app_config::AppType;
@@ -58,10 +59,10 @@ pub use claude::{
 pub use codex::CodexAdapter;
 pub use codex::{
     apply_codex_chat_upstream_model, apply_codex_upstream_model, codex_provider_upstream_model,
-    inject_codex_chat_prompt_cache_key, is_codex_official_provider,
-    provider_needs_responses_namespace_flatten, resolve_codex_catalog_tool_profile,
-    resolve_codex_chat_reasoning_config, should_convert_codex_responses_to_anthropic,
-    should_convert_codex_responses_to_chat,
+    codex_provider_uses_chat_completions, inject_codex_chat_prompt_cache_key,
+    is_codex_official_provider, provider_needs_responses_namespace_flatten,
+    resolve_codex_catalog_tool_profile, resolve_codex_chat_reasoning_config,
+    should_convert_codex_responses_to_anthropic, should_convert_codex_responses_to_chat,
 };
 pub use gemini::GeminiAdapter;
 
@@ -189,7 +190,7 @@ impl ProviderType {
                 }
                 ProviderType::Claude
             }
-            AppType::Codex => ProviderType::Codex,
+            AppType::Codex | AppType::WorkBuddy => ProviderType::Codex,
             AppType::Gemini => {
                 // 检测是否为 CLI 模式（OAuth）
                 let adapter = GeminiAdapter::new();
@@ -260,7 +261,7 @@ impl std::str::FromStr for ProviderType {
 pub fn get_adapter(app_type: &AppType) -> Option<Box<dyn ProviderAdapter>> {
     Some(match app_type {
         AppType::Claude | AppType::ClaudeDesktop => Box::new(ClaudeAdapter::new()),
-        AppType::Codex => Box::new(CodexAdapter::new()),
+        AppType::Codex | AppType::WorkBuddy => Box::new(CodexAdapter::new()),
         AppType::Gemini => Box::new(GeminiAdapter::new()),
         AppType::GrokBuild => Box::new(CodexAdapter::new()),
         AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => Box::new(CodexAdapter::new()),

@@ -852,6 +852,7 @@ impl ProxyService {
         should_sync_backup: bool,
         live_taken_over: bool,
         previous_codex_live_state: Option<&crate::codex_config::CodexLiveStateSnapshot>,
+        previous_workbuddy_live_state: Option<&Value>,
     ) {
         if !should_sync_backup {
             return;
@@ -873,6 +874,16 @@ impl ProxyService {
             if let Err(error) = previous_live.restore_preserving_newer_same_account_auth() {
                 log::error!(
                     "{} 热切换失败后恢复 Codex Live 状态失败: {error}",
+                    app_type.as_str()
+                );
+            }
+            return;
+        }
+
+        if let Some(previous_live) = previous_workbuddy_live_state {
+            if let Err(error) = self.write_workbuddy_live(previous_live) {
+                log::error!(
+                    "{} hot-switch rollback failed to restore WorkBuddy Live state: {error}",
                     app_type.as_str()
                 );
             }
@@ -1111,6 +1122,12 @@ impl ProxyService {
             .await
             .map(|c| c.enabled)
             .unwrap_or(false);
+        let workbuddy_enabled = self
+            .db
+            .get_proxy_config_for_app("workbuddy")
+            .await
+            .map(|config| config.enabled)
+            .unwrap_or(false);
         let gemini_enabled = self
             .db
             .get_proxy_config_for_app("gemini")
@@ -1130,6 +1147,7 @@ impl ProxyService {
         Ok(ProxyTakeoverStatus {
             claude: claude_enabled,
             codex: codex_enabled,
+            workbuddy: workbuddy_enabled,
             gemini: gemini_enabled,
             grokbuild: grokbuild_enabled,
             opencode: opencode_enabled,
@@ -1411,6 +1429,15 @@ impl ProxyService {
     /// 在清空 Live Token 之前调用，确保数据库中的 Provider 配置有最新的 Token。
     /// 这样代理才能从数据库读取到正确的认证信息。
     async fn sync_live_to_provider(&self, app_type: &AppType) -> Result<(), String> {
+        // WorkBuddy takeover is additive: models.json contains all user models,
+        // not a live snapshot of the selected CC Switch provider. Importing it
+        // into provider SSOT would be both invalid and destructive, so there is
+        // intentionally nothing to synchronize before installing the managed
+        // cc-switch-workbuddy row.
+        if matches!(app_type, AppType::WorkBuddy) {
+            return Ok(());
+        }
+
         let live_config = match app_type {
             AppType::Claude => self.read_claude_live()?,
             AppType::Codex => self.read_codex_live()?,
@@ -1758,7 +1785,7 @@ impl ProxyService {
             .map_err(|e| format!("清除接管状态失败: {e}"))?;
 
         // 4. 清除所有应用的 enabled 状态（用户手动关闭，不需要下次自动恢复）
-        for app_type in ["claude", "codex", "gemini", "grokbuild"] {
+        for app_type in ["claude", "codex", "workbuddy", "gemini", "grokbuild"] {
             if let Ok(mut config) = self.db.get_proxy_config_for_app(app_type).await {
                 if config.enabled {
                     config.enabled = false;
@@ -1856,6 +1883,33 @@ impl ProxyService {
             }
         }
 
+        // WorkBuddy's missing models.json is represented as an empty array so
+        // explicit takeover can create the managed model. The legacy bulk
+        // takeover path must not interpret that virtual empty config as an
+        // installed/configured WorkBuddy app, otherwise starting another app's
+        // proxy would create ~/.workbuddy/models.json or require a WorkBuddy
+        // provider. Only include it when WorkBuddy actually has a selected
+        // provider.
+        if self
+            .get_current_provider_for_app(&AppType::WorkBuddy)?
+            .is_some()
+        {
+            if let Ok(config) = self.read_workbuddy_live() {
+                if Self::live_has_proxy_placeholder_for_app(&AppType::WorkBuddy, &config) {
+                    log::warn!(
+                        "workbuddy Live is already taken over; keeping the existing original backup"
+                    );
+                } else {
+                    let json_str = serde_json::to_string(&config)
+                        .map_err(|e| format!("Failed to serialize WorkBuddy config: {e}"))?;
+                    self.db
+                        .save_live_backup("workbuddy", &json_str)
+                        .await
+                        .map_err(|e| format!("Failed to back up WorkBuddy config: {e}"))?;
+                }
+            }
+        }
+
         // Gemini
         if let Ok(config) = self.read_gemini_live() {
             if Self::live_has_proxy_placeholder_for_app(&AppType::Gemini, &config) {
@@ -1893,6 +1947,7 @@ impl ProxyService {
         let (app_type_str, mut config) = match app_type {
             AppType::Claude => ("claude", self.read_claude_live()?),
             AppType::Codex => ("codex", self.read_codex_live()?),
+            AppType::WorkBuddy => ("workbuddy", self.read_workbuddy_live()?),
             AppType::Gemini => ("gemini", self.read_gemini_live()?),
             AppType::GrokBuild => ("grokbuild", self.read_grok_live()?),
             _ => return Err("该应用不支持代理功能".to_string()),
@@ -2024,6 +2079,26 @@ impl ProxyService {
             log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
         }
 
+        // WorkBuddy: append/update only the CC Switch managed Chat model. A
+        // missing current provider means WorkBuddy is not participating in this
+        // legacy bulk takeover, even though read_models() intentionally returns
+        // an empty array when models.json does not exist.
+        if let Some(provider) = self.get_current_provider_for_app(&AppType::WorkBuddy)? {
+            let mut live_config = self.read_workbuddy_live()?;
+            let proxy_endpoint = format!(
+                "{}/workbuddy/v1/chat/completions",
+                proxy_url.trim_end_matches('/')
+            );
+            crate::workbuddy_config::install_managed_model(
+                &mut live_config,
+                &provider,
+                &proxy_endpoint,
+            )
+            .map_err(|error| format!("Failed to update WorkBuddy models.json: {error}"))?;
+            self.write_workbuddy_live(&live_config)?;
+            log::info!("WorkBuddy Live config taken over at {proxy_endpoint}");
+        }
+
         // Gemini: 修改 GOOGLE_GEMINI_BASE_URL，使用占位符替代真实 Token（代理会注入真实 Token）
         if let Ok(mut live_config) = self.read_gemini_live() {
             if let Some(env) = live_config.get_mut("env").and_then(|v| v.as_object_mut()) {
@@ -2079,6 +2154,22 @@ impl ProxyService {
                 self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                     .await?;
                 log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
+            }
+            AppType::WorkBuddy => {
+                let mut live_config = self.read_workbuddy_live()?;
+                let provider = self.require_current_provider_for_app(&AppType::WorkBuddy)?;
+                let proxy_endpoint = format!(
+                    "{}/workbuddy/v1/chat/completions",
+                    proxy_url.trim_end_matches('/')
+                );
+                crate::workbuddy_config::install_managed_model(
+                    &mut live_config,
+                    &provider,
+                    &proxy_endpoint,
+                )
+                .map_err(|error| format!("更新 WorkBuddy models.json 失败: {error}"))?;
+                self.write_workbuddy_live(&live_config)?;
+                log::info!("WorkBuddy Live 配置已接管，代理地址: {proxy_endpoint}");
             }
             AppType::Gemini => {
                 let mut live_config = self.read_gemini_live()?;
@@ -2149,6 +2240,22 @@ impl ProxyService {
                 let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
                 self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                     .await?;
+            }
+            AppType::WorkBuddy => {
+                if let Ok(mut live_config) = self.read_workbuddy_live() {
+                    let provider = self.require_current_provider_for_app(&AppType::WorkBuddy)?;
+                    let proxy_endpoint = format!(
+                        "{}/workbuddy/v1/chat/completions",
+                        proxy_url.trim_end_matches('/')
+                    );
+                    crate::workbuddy_config::install_managed_model(
+                        &mut live_config,
+                        &provider,
+                        &proxy_endpoint,
+                    )
+                    .map_err(|error| format!("更新 WorkBuddy models.json 失败: {error}"))?;
+                    self.write_workbuddy_live(&live_config)?;
+                }
             }
             AppType::Gemini => {
                 if let Ok(mut live_config) = self.read_gemini_live() {
@@ -2230,6 +2337,14 @@ impl ProxyService {
                     log::info!("Codex Live 配置已恢复");
                 }
             }
+            AppType::WorkBuddy => {
+                if let Ok(mut live_config) = self.read_workbuddy_live() {
+                    crate::workbuddy_config::remove_managed_model(&mut live_config)
+                        .map_err(|error| format!("清理 WorkBuddy 托管模型失败: {error}"))?;
+                    self.write_workbuddy_live(&live_config)?;
+                    log::info!("WorkBuddy Live 配置已恢复（保留非托管模型）");
+                }
+            }
             AppType::Gemini => {
                 if let Ok(Some(backup)) = self.db.get_live_backup("gemini").await {
                     let config: Value = serde_json::from_str(&backup.original_config)
@@ -2259,6 +2374,7 @@ impl ProxyService {
         for app_type in [
             AppType::Claude,
             AppType::Codex,
+            AppType::WorkBuddy,
             AppType::Gemini,
             AppType::GrokBuild,
         ] {
@@ -2349,6 +2465,12 @@ impl ProxyService {
         match app_type {
             AppType::Claude => self.write_claude_live(config),
             AppType::Codex => self.write_codex_restore_backup(config),
+            AppType::WorkBuddy => {
+                let mut current = self.read_workbuddy_live()?;
+                crate::workbuddy_config::remove_managed_model(&mut current)
+                    .map_err(|error| format!("清理 WorkBuddy 托管模型失败: {error}"))?;
+                self.write_workbuddy_live(&current)
+            }
             AppType::Gemini => self.write_gemini_live(config),
             AppType::GrokBuild => self.write_grok_live(config),
             _ => Err("该应用不支持代理功能".to_string()),
@@ -2363,6 +2485,10 @@ impl ProxyService {
             },
             AppType::Codex => match self.read_codex_live() {
                 Ok(config) => Self::is_codex_live_taken_over(&config),
+                Err(_) => false,
+            },
+            AppType::WorkBuddy => match self.read_workbuddy_live() {
+                Ok(config) => crate::workbuddy_config::contains_managed_proxy(&config),
                 Err(_) => false,
             },
             AppType::Gemini => match self.read_gemini_live() {
@@ -2383,6 +2509,16 @@ impl ProxyService {
     /// - Ok(true)：已成功写回
     /// - Ok(false)：缺少当前供应商/供应商不存在/供应商本身含占位符，无法写回
     fn restore_live_from_ssot_for_app(&self, app_type: &AppType) -> Result<bool, String> {
+        // WorkBuddy takeover is additive. Its provider SSOT is not a models.json
+        // replacement; restoring means removing only the managed CC Switch row.
+        if matches!(app_type, AppType::WorkBuddy) {
+            let mut config = self.read_workbuddy_live()?;
+            crate::workbuddy_config::remove_managed_model(&mut config)
+                .map_err(|error| format!("Failed to remove managed WorkBuddy model: {error}"))?;
+            self.write_workbuddy_live(&config)?;
+            return Ok(true);
+        }
+
         let current_id = crate::settings::get_effective_current_provider(&self.db, app_type)
             .map_err(|e| format!("获取 {app_type:?} 当前供应商失败: {e}"))?;
 
@@ -2427,6 +2563,12 @@ impl ProxyService {
         match app_type {
             AppType::Claude => self.cleanup_claude_takeover_placeholders_in_live(),
             AppType::Codex => self.cleanup_codex_takeover_placeholders_in_live(),
+            AppType::WorkBuddy => {
+                let mut config = self.read_workbuddy_live()?;
+                crate::workbuddy_config::remove_managed_model(&mut config)
+                    .map_err(|error| format!("清理 WorkBuddy 托管模型失败: {error}"))?;
+                self.write_workbuddy_live(&config)
+            }
             AppType::Gemini => self.cleanup_gemini_takeover_placeholders_in_live(),
             AppType::GrokBuild => self.cleanup_grok_takeover_placeholders_in_live(),
             _ => Ok(()),
@@ -2511,6 +2653,23 @@ impl ProxyService {
                         })
                     });
                 Ok(Self::is_codex_live_taken_over(&config) && base_url_matches)
+            }
+            AppType::WorkBuddy => {
+                let config = self.read_workbuddy_live()?;
+                let expected = format!(
+                    "{}/workbuddy/v1/chat/completions",
+                    proxy_url.trim_end_matches('/')
+                );
+                let matches = config.as_array().is_some_and(|models| {
+                    models.iter().any(|model| {
+                        crate::workbuddy_config::is_managed_model(model)
+                            && model
+                                .get("url")
+                                .and_then(Value::as_str)
+                                .is_some_and(|url| Self::proxy_urls_match(url, &expected))
+                    })
+                });
+                Ok(matches)
             }
             AppType::Gemini => {
                 let config = self.read_gemini_live()?;
@@ -2777,6 +2936,7 @@ impl ProxyService {
         match app_type {
             AppType::Claude => Self::is_claude_live_taken_over(config),
             AppType::Codex => Self::is_codex_live_taken_over(config),
+            AppType::WorkBuddy => crate::workbuddy_config::contains_managed_proxy(config),
             AppType::Gemini => Self::is_gemini_live_taken_over(config),
             AppType::GrokBuild => Self::is_grok_live_taken_over(config),
             _ => false,
@@ -2806,6 +2966,14 @@ impl ProxyService {
     ) -> Result<(), String> {
         let app_type_enum =
             AppType::from_str(app_type).map_err(|_| format!("未知的应用类型: {app_type}"))?;
+
+        // WorkBuddy's backup is the original user-owned models.json captured
+        // when takeover starts. Provider settings must never replace it during
+        // a hot switch; only the managed row in Live needs reprojection.
+        if matches!(app_type_enum, AppType::WorkBuddy) {
+            return Ok(());
+        }
+
         let mut effective_settings = if matches!(app_type_enum, AppType::Codex) {
             build_effective_provider_for_live_with_codex_oauth_manager(
                 self.db.as_ref(),
@@ -3046,6 +3214,12 @@ impl ProxyService {
             } else {
                 None
             };
+        let previous_workbuddy_live_state =
+            if should_sync_backup && matches!(app_type_enum, AppType::WorkBuddy) {
+                Some(self.read_workbuddy_live()?)
+            } else {
+                None
+            };
 
         let prepare_result: Result<(), String> = async {
             if should_sync_backup {
@@ -3069,6 +3243,22 @@ impl ProxyService {
                 } else if live_taken_over && matches!(app_type_enum, AppType::GrokBuild) {
                     self.sync_grok_live_from_provider_while_proxy_active(&provider)
                         .await?;
+                } else if live_taken_over && matches!(app_type_enum, AppType::WorkBuddy) {
+                    let (proxy_url, _) = self.build_proxy_urls().await?;
+                    let proxy_endpoint = format!(
+                        "{}/workbuddy/v1/chat/completions",
+                        proxy_url.trim_end_matches('/')
+                    );
+                    let mut live_config = self.read_workbuddy_live()?;
+                    crate::workbuddy_config::install_managed_model(
+                        &mut live_config,
+                        &provider,
+                        &proxy_endpoint,
+                    )
+                    .map_err(|error| {
+                        format!("Failed to update WorkBuddy managed model: {error}")
+                    })?;
+                    self.write_workbuddy_live(&live_config)?;
                 }
             }
 
@@ -3142,6 +3332,7 @@ impl ProxyService {
                 should_sync_backup,
                 live_taken_over,
                 previous_codex_live_state.as_ref(),
+                previous_workbuddy_live_state.as_ref(),
             )
             .await;
             return Err(error);
@@ -3156,6 +3347,7 @@ impl ProxyService {
                 should_sync_backup,
                 live_taken_over,
                 previous_codex_live_state.as_ref(),
+                previous_workbuddy_live_state.as_ref(),
             )
             .await;
             return Err(format!("更新本地当前供应商失败: {error}"));
@@ -3177,6 +3369,7 @@ impl ProxyService {
                 should_sync_backup,
                 live_taken_over,
                 previous_codex_live_state.as_ref(),
+                previous_workbuddy_live_state.as_ref(),
             )
             .await;
             return Err(format!("更新当前供应商失败: {error}"));
@@ -3806,6 +3999,16 @@ impl ProxyService {
         Ok(())
     }
 
+    fn read_workbuddy_live(&self) -> Result<Value, String> {
+        crate::workbuddy_config::read_models()
+            .map_err(|error| format!("读取 WorkBuddy models.json 失败: {error}"))
+    }
+
+    fn write_workbuddy_live(&self, config: &Value) -> Result<(), String> {
+        crate::workbuddy_config::write_models(config)
+            .map_err(|error| format!("写入 WorkBuddy models.json 失败: {error}"))
+    }
+
     fn read_gemini_live(&self) -> Result<Value, String> {
         use crate::gemini_config::{env_to_json, get_gemini_env_path, read_gemini_env};
 
@@ -3920,6 +4123,7 @@ impl ProxyService {
             for app_type in [
                 AppType::Claude,
                 AppType::Codex,
+                AppType::WorkBuddy,
                 AppType::Gemini,
                 AppType::GrokBuild,
             ] {
@@ -4072,6 +4276,151 @@ mod tests {
         assert!(service.set_takeover_for_app("pi", true).await.is_err());
         assert!(!service.is_running().await);
         assert!(service.switch_proxy_target("pi", "missing").await.is_err());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn workbuddy_hot_switch_reprojects_only_managed_model() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let service = ProxyService::new(db.clone());
+        let provider_a =
+            Provider::with_id("a".to_string(), "Responses A".to_string(), json!({}), None);
+        let provider_b =
+            Provider::with_id("b".to_string(), "Responses B".to_string(), json!({}), None);
+        db.save_provider("workbuddy", &provider_a)
+            .expect("save provider a");
+        db.save_provider("workbuddy", &provider_b)
+            .expect("save provider b");
+        db.set_current_provider("workbuddy", "a")
+            .expect("set current provider");
+        crate::settings::set_current_provider(&AppType::WorkBuddy, Some("a"))
+            .expect("set local current provider");
+
+        let original = json!([{
+            "id": "user-model",
+            "name": "User model",
+            "url": "https://example.com/v1/chat/completions"
+        }]);
+        service
+            .write_workbuddy_live(&original)
+            .expect("seed WorkBuddy live config");
+        db.save_live_backup(
+            "workbuddy",
+            &serde_json::to_string(&original).expect("serialize original models"),
+        )
+        .await
+        .expect("seed WorkBuddy backup");
+
+        let mut taken_over = original.clone();
+        crate::workbuddy_config::install_managed_model(
+            &mut taken_over,
+            &provider_a,
+            "http://127.0.0.1:15721/workbuddy/v1/chat/completions",
+        )
+        .expect("install managed model");
+        service
+            .write_workbuddy_live(&taken_over)
+            .expect("seed taken-over WorkBuddy config");
+
+        service
+            .hot_switch_provider("workbuddy", "b")
+            .await
+            .expect("hot switch WorkBuddy provider");
+
+        let live = service
+            .read_workbuddy_live()
+            .expect("read WorkBuddy live config");
+        let models = live.as_array().expect("models array");
+        assert!(models
+            .iter()
+            .any(|model| model.get("id") == Some(&json!("user-model"))));
+        let managed = models
+            .iter()
+            .find(|model| crate::workbuddy_config::is_managed_model(model))
+            .expect("managed model");
+        assert_eq!(managed.get("name"), Some(&json!("CC Switch · Responses B")));
+
+        let backup = db
+            .get_live_backup("workbuddy")
+            .await
+            .expect("read backup")
+            .expect("backup exists");
+        assert_eq!(
+            serde_json::from_str::<Value>(&backup.original_config).expect("parse backup"),
+            original,
+            "hot switching must not replace the user's original models.json backup"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn workbuddy_takeover_toggle_installs_and_removes_managed_model() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+        crate::settings::update_settings(crate::settings::AppSettings::default())
+            .expect("reset settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+        let provider = Provider::with_id(
+            "krill".to_string(),
+            "Krill Responses".to_string(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "test-key" },
+                "config": "base_url = \"https://api.example.com/v1\"\nmodel = \"gpt-test\"\nwire_api = \"responses\"\n"
+            }),
+            None,
+        );
+        db.save_provider("workbuddy", &provider)
+            .expect("save WorkBuddy provider");
+        db.set_current_provider("workbuddy", &provider.id)
+            .expect("set WorkBuddy current provider");
+        crate::settings::set_current_provider(&AppType::WorkBuddy, Some(&provider.id))
+            .expect("set local WorkBuddy current provider");
+
+        let original = json!([{
+            "id": "user-model",
+            "name": "User model",
+            "url": "https://example.com/v1/chat/completions"
+        }]);
+        service
+            .write_workbuddy_live(&original)
+            .expect("seed WorkBuddy live config");
+
+        service
+            .set_takeover_for_app("workbuddy", true)
+            .await
+            .expect("enable WorkBuddy takeover");
+
+        let taken_over = service
+            .read_workbuddy_live()
+            .expect("read taken-over WorkBuddy models");
+        assert!(crate::workbuddy_config::contains_managed_proxy(&taken_over));
+        assert!(taken_over.as_array().is_some_and(|models| models
+            .iter()
+            .any(|model| model.get("id") == Some(&json!("user-model")))));
+        assert!(
+            db.get_proxy_config_for_app("workbuddy")
+                .await
+                .expect("read WorkBuddy proxy config")
+                .enabled
+        );
+
+        service
+            .set_takeover_for_app("workbuddy", false)
+            .await
+            .expect("disable WorkBuddy takeover");
+        assert_eq!(
+            service
+                .read_workbuddy_live()
+                .expect("read restored WorkBuddy models"),
+            original
+        );
+        assert!(!service.is_running().await);
     }
 
     async fn running_codex_base_url(service: &ProxyService) -> String {
@@ -4641,6 +4990,10 @@ mod tests {
             .stop_with_restore()
             .await
             .expect("stop proxy and restore live config");
+        assert!(
+            !crate::workbuddy_config::get_workbuddy_models_path().exists(),
+            "bulk takeover for another app must not create WorkBuddy models.json without a selected WorkBuddy provider"
+        );
     }
 
     #[tokio::test]

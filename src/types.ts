@@ -292,6 +292,7 @@ export interface VisibleApps {
   claude: boolean;
   "claude-desktop": boolean;
   codex: boolean;
+  workbuddy: boolean;
   gemini: boolean;
   grokbuild: boolean;
   opencode: boolean;

@@ -527,6 +527,7 @@ fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet:
             _ => false,
         },
         AppType::GrokBuild
+        | AppType::WorkBuddy
         | AppType::OpenCode
         | AppType::OpenClaw
         | AppType::Hermes
@@ -602,6 +603,7 @@ pub(crate) fn remove_common_config_from_settings(
             Ok(result)
         }
         AppType::GrokBuild
+        | AppType::WorkBuddy
         | AppType::OpenCode
         | AppType::OpenClaw
         | AppType::Hermes
@@ -662,6 +664,7 @@ fn apply_common_config_to_settings(
             Ok(result)
         }
         AppType::GrokBuild
+        | AppType::WorkBuddy
         | AppType::OpenCode
         | AppType::OpenClaw
         | AppType::Hermes
@@ -1285,6 +1288,9 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
                 crate::codex_config::record_codex_managed_oauth_live_auth(auth)?;
             }
         }
+        AppType::WorkBuddy => {
+            // WorkBuddy is projected only by ProxyService while takeover is active.
+        }
         AppType::Gemini => {
             // Delegate to write_gemini_live which handles env file writing correctly
             write_gemini_live(provider)?;
@@ -1581,6 +1587,7 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
             }
             Ok(result)
         }
+        AppType::WorkBuddy => crate::workbuddy_config::read_models(),
         AppType::Claude => {
             let path = get_claude_settings_path();
             if !path.exists() {
@@ -1786,6 +1793,7 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
             })
         }
         // OpenCode, OpenClaw and Hermes use additive mode and are handled by early return above
+        AppType::WorkBuddy => crate::workbuddy_config::read_models()?,
         AppType::OpenCode | AppType::OpenClaw | AppType::Hermes | AppType::Pi => {
             unreachable!("additive mode apps are handled by early return")
         }

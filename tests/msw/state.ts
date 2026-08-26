@@ -54,6 +54,7 @@ const createDefaultProviders = (): ProvidersByApp => ({
       createdAt: Date.now() + 1,
     },
   },
+  workbuddy: {},
   gemini: {
     "gemini-1": {
       id: "gemini-1",
@@ -80,6 +81,7 @@ const createDefaultCurrent = (): CurrentProviderState => ({
   claude: "claude-1",
   "claude-desktop": "",
   codex: "codex-1",
+  workbuddy: "",
   gemini: "gemini-1",
   grokbuild: "",
   opencode: "",
@@ -194,6 +196,7 @@ let mcpConfigs: McpConfigState = {
       },
     },
   },
+  workbuddy: {},
   gemini: {},
   grokbuild: {},
   opencode: {},
@@ -264,6 +267,7 @@ export const resetProviderState = () => {
         },
       },
     },
+    workbuddy: {},
     gemini: {},
     grokbuild: {},
     opencode: {},

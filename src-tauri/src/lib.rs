@@ -34,6 +34,7 @@ mod services;
 mod session_manager;
 mod settings;
 mod store;
+mod workbuddy_config;
 
 mod tray;
 mod usage_events;

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>WorkBuddy</title>
+  <defs>
+    <linearGradient id="wb-bg" x1="160" y1="140" x2="860" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16c7b1"/>
+      <stop offset="1" stop-color="#08c879"/>
+    </linearGradient>
+    <linearGradient id="wb-face" x1="410" y1="430" x2="790" y2="900" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#08c9a3"/>
+      <stop offset="1" stop-color="#76d367"/>
+    </linearGradient>
+  </defs>
+  <rect x="102" y="102" width="820" height="820" rx="180" fill="url(#wb-bg)"/>
+  <path fill="#f8fffd" d="M207 906c-27-56-25-101 1-132-3-25-3-52-1-79-57-91-99-190-85-220 15-34 104-9 217 1 76-70 158-116 246-142 34-91 76-180 103-188 32-10 111 82 152 181l71 42 11-3v379c0 98-79 177-177 177H280c-29 0-53-5-73-16Z"/>
+  <g transform="rotate(-31 626 666)">
+    <rect x="303" y="459" width="668" height="405" rx="154" fill="url(#wb-face)"/>
+    <rect x="477" y="602" width="77" height="158" rx="39" fill="#fff"/>
+    <rect x="744" y="602" width="77" height="158" rx="39" fill="#fff"/>
+  </g>
+</svg>

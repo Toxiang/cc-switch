@@ -1869,6 +1869,11 @@ requires_openai_auth = true
         crate::settings::reload_settings().expect("reload settings");
 
         let db = Arc::new(Database::memory().expect("init db"));
+        let mut proxy_config = db.get_proxy_config().await.expect("get test proxy config");
+        proxy_config.listen_port = 0;
+        db.update_proxy_config(proxy_config)
+            .await
+            .expect("use an ephemeral proxy port");
         let state = AppState::new(db.clone());
 
         let mut original = Provider::with_id(
@@ -1918,7 +1923,7 @@ requires_openai_auth = true
                 .expect("update app proxy config");
         }
 
-        state
+        let proxy_info = state
             .proxy_service
             .start()
             .await
@@ -1966,7 +1971,10 @@ requires_openai_auth = true
         let profile: Value = read_json_file(&profile_path).expect("read desktop profile");
         assert_eq!(
             profile["inferenceGatewayBaseUrl"],
-            json!("http://127.0.0.1:15721/claude-desktop"),
+            json!(format!(
+                "http://127.0.0.1:{}/claude-desktop",
+                proxy_info.port
+            )),
             "desktop profile should stay pointed at the local gateway during takeover"
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
@@ -5535,6 +5543,7 @@ impl ProviderService {
             AppType::Claude => Self::extract_claude_common_config(&provider.settings_config),
             AppType::ClaudeDesktop => Ok(String::new()),
             AppType::Codex => Self::extract_codex_common_config(&provider.settings_config),
+            AppType::WorkBuddy => Ok(String::new()),
             AppType::Gemini => Self::extract_gemini_common_config(&provider.settings_config),
             AppType::GrokBuild => Ok(String::new()),
             AppType::OpenCode => Self::extract_opencode_common_config(&provider.settings_config),
@@ -5553,6 +5562,7 @@ impl ProviderService {
             AppType::Claude => Self::extract_claude_common_config(settings_config),
             AppType::ClaudeDesktop => Ok(String::new()),
             AppType::Codex => Self::extract_codex_common_config(settings_config),
+            AppType::WorkBuddy => Ok(String::new()),
             AppType::Gemini => Self::extract_gemini_common_config(settings_config),
             AppType::GrokBuild => Ok(String::new()),
             AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
@@ -6222,7 +6232,7 @@ impl ProviderService {
             AppType::ClaudeDesktop => {
                 crate::claude_desktop_config::validate_provider(provider)?;
             }
-            AppType::Codex => {
+            AppType::Codex | AppType::WorkBuddy => {
                 let settings = provider.settings_config.as_object().ok_or_else(|| {
                     AppError::localized(
                         "provider.codex.settings.not_object",
@@ -6418,7 +6428,7 @@ impl ProviderService {
                     crate::claude_desktop_config::direct_gateway_credentials(provider)?;
                 Ok((credentials.api_key, credentials.base_url))
             }
-            AppType::Codex => {
+            AppType::Codex | AppType::WorkBuddy => {
                 let _auth = provider
                     .settings_config
                     .get("auth")

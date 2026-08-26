@@ -15,18 +15,25 @@ describe("appConfig provider lifecycle", () => {
     expect(isAdditiveAppId(appId)).toBe(true);
   });
 
-  it.each(["claude", "claude-desktop", "codex", "gemini", "grokbuild"])(
+  it.each([
+    "claude",
+    "claude-desktop",
+    "codex",
+    "workbuddy",
+    "gemini",
+    "grokbuild",
+  ])(
     "does not classify %s as additive",
     (appId) => {
       expect(isAdditiveAppId(appId)).toBe(false);
     },
   );
 
-  it("exposes only Codex and OpenCode across product app lists", () => {
-    expect(APP_IDS).toEqual(["codex", "opencode"]);
+  it("exposes Codex, OpenCode, and WorkBuddy at product level", () => {
+    expect(APP_IDS).toEqual(["codex", "opencode", "workbuddy"]);
     expect(SKILLS_APP_IDS).toEqual(["codex", "opencode"]);
     expect(MCP_APP_IDS).toEqual(["codex", "opencode"]);
-    expect(PROXY_APP_IDS).toEqual(["codex"]);
+    expect(PROXY_APP_IDS).toEqual(["codex", "workbuddy"]);
     expect(ADDITIVE_APP_IDS).toEqual(["opencode"]);
   });
 
@@ -40,7 +47,7 @@ describe("appConfig provider lifecycle", () => {
       }),
     ).toEqual({
       ...DEFAULT_VISIBLE_APPS,
-      codex: true,
+      codex: false,
       opencode: false,
     });
   });

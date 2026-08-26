@@ -319,6 +319,10 @@ impl ProxyServer {
                 "/codex/v1/chat/completions",
                 post(handlers::handle_chat_completions),
             )
+            .route(
+                "/workbuddy/v1/chat/completions",
+                post(handlers::handle_workbuddy_chat_completions),
+            )
             // OpenAI Models API (Codex CLI reachability check)
             .route("/models", get(handlers::handle_models))
             .route("/v1/models", get(handlers::handle_models))

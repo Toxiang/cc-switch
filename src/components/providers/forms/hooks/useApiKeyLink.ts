@@ -84,6 +84,7 @@ export function useApiKeyLink({
       appId === "claude" ||
       appId === "claude-desktop" ||
       appId === "codex" ||
+      appId === "workbuddy" ||
       appId === "gemini" ||
       appId === "opencode" ||
       appId === "openclaw" ||

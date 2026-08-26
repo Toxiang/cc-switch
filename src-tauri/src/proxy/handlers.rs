@@ -32,7 +32,7 @@ use super::{
             create_anthropic_sse_stream_from_responses_with_web_search_options,
         },
         transform, transform_codex_anthropic, transform_codex_chat,
-        transform_codex_responses_namespace, transform_gemini, transform_responses,
+        transform_codex_responses_namespace, transform_gemini, transform_responses, workbuddy,
     },
     response_processor::{
         create_logged_passthrough_stream, create_usage_collector, process_response,
@@ -821,6 +821,235 @@ pub async fn handle_chat_completions(
         connection_guard,
     )
     .await
+}
+
+/// WorkBuddy always speaks Chat Completions. Its selected upstream may speak
+/// either Chat Completions or Responses; the latter is bridged in both
+/// directions here so WorkBuddy itself never needs Responses support.
+pub async fn handle_workbuddy_chat_completions(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    let (parts, req_body) = request.into_parts();
+    let method = parts.method.clone();
+    let uri = parts.uri;
+    let mut headers = parts.headers;
+    let extensions = parts.extensions;
+    let body_bytes = req_body
+        .collect()
+        .await
+        .map_err(|error| ProxyError::Internal(format!("Failed to read request body: {error}")))?
+        .to_bytes();
+    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
+    let original_body: Value = serde_json::from_slice(&body_bytes).map_err(|error| {
+        ProxyError::InvalidRequest(format!("Failed to parse request body: {error}"))
+    })?;
+    let is_stream = original_body
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let mut ctx = RequestContext::new(
+        &state,
+        &original_body,
+        &headers,
+        AppType::WorkBuddy,
+        "WorkBuddy",
+        "workbuddy",
+    )
+    .await?;
+    // Keep the client request in Chat format until the per-provider attempt.
+    // The forwarder performs Chat -> Responses conversion for each Responses
+    // provider independently, so a mixed-format failover queue remains valid.
+    let endpoint = endpoint_with_query(&uri, "/chat/completions");
+
+    let forwarder = ctx.create_forwarder(&state);
+    let mut result = match forwarder
+        .forward_with_retry(
+            &AppType::WorkBuddy,
+            method,
+            &endpoint,
+            original_body,
+            headers,
+            extensions,
+            ctx.get_providers(),
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(mut error) => {
+            if let Some(provider) = error.provider.take() {
+                ctx.provider = provider;
+            }
+            log_forward_error(&state, &ctx, is_stream, &error.error);
+            return build_codex_proxy_error_response(&ctx, &endpoint, &error.error);
+        }
+    };
+
+    let connection_guard = result.connection_guard.take();
+    ctx.outbound_model = result.outbound_model.take();
+    ctx.provider = result.provider;
+    let response = result.response;
+    let uses_chat = super::providers::codex_provider_uses_chat_completions(&ctx.provider);
+    if uses_chat {
+        return process_response(
+            response,
+            &ctx,
+            &state,
+            &OPENAI_PARSER_CONFIG,
+            connection_guard,
+        )
+        .await;
+    }
+
+    if is_stream || response.is_sse() {
+        let status = response.status();
+        let converted = workbuddy::responses_sse_to_chat_sse(response.bytes_stream());
+        let usage_collector = if usage_logging_enabled(&state) {
+            let state = state.clone();
+            let provider_id = ctx.provider.id.clone();
+            let request_model = ctx.request_model.clone();
+            let outbound_model = ctx
+                .outbound_model
+                .clone()
+                .unwrap_or_else(|| request_model.clone());
+            let app_type_str = ctx.app_type_str;
+            let session_id = ctx.session_id.clone();
+            let start_time = ctx.start_time;
+            Some(SseUsageCollector::new(
+                start_time,
+                None,
+                move |events, first_token_ms| {
+                    let Some(usage) = TokenUsage::from_openai_stream_events(&events)
+                        .filter(TokenUsage::has_billable_tokens)
+                    else {
+                        return;
+                    };
+                    let model = usage
+                        .model
+                        .clone()
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| outbound_model.clone());
+                    let state = state.clone();
+                    let provider_id = provider_id.clone();
+                    let request_model = request_model.clone();
+                    let outbound_model = outbound_model.clone();
+                    let session_id = session_id.clone();
+                    tokio::spawn(async move {
+                        log_usage(
+                            &state,
+                            &provider_id,
+                            app_type_str,
+                            &model,
+                            &request_model,
+                            &outbound_model,
+                            usage,
+                            start_time.elapsed().as_millis() as u64,
+                            first_token_ms,
+                            true,
+                            status.as_u16(),
+                            Some(session_id),
+                        )
+                        .await;
+                    });
+                },
+            ))
+        } else {
+            None
+        };
+        let logged = create_logged_passthrough_stream(
+            converted,
+            ctx.tag,
+            usage_collector,
+            ctx.streaming_timeout_config(),
+            connection_guard,
+        );
+        let mut response_headers = axum::http::HeaderMap::new();
+        response_headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("text/event-stream"),
+        );
+        response_headers.insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        );
+        return Ok((
+            status,
+            response_headers,
+            axum::body::Body::from_stream(logged),
+        )
+            .into_response());
+    }
+
+    let _connection_guard = connection_guard;
+    let timeout =
+        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+            std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
+        } else {
+            std::time::Duration::ZERO
+        };
+    let (mut response_headers, status, body_bytes) =
+        read_decoded_body(response, ctx.tag, timeout).await?;
+    let responses_body: Value = serde_json::from_slice(&body_bytes).map_err(|error| {
+        ProxyError::TransformError(format!("Failed to parse Responses upstream body: {error}"))
+    })?;
+    let chat_body = workbuddy::responses_to_chat_completion(responses_body)?;
+
+    if let Some(usage) =
+        TokenUsage::from_openai_response(&chat_body).filter(TokenUsage::has_billable_tokens)
+    {
+        let model = chat_body
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| ctx.outbound_model.clone())
+            .unwrap_or_else(|| ctx.request_model.clone());
+        let state = state.clone();
+        let provider_id = ctx.provider.id.clone();
+        let request_model = ctx.request_model.clone();
+        let outbound_model = ctx
+            .outbound_model
+            .clone()
+            .unwrap_or_else(|| request_model.clone());
+        let session_id = ctx.session_id.clone();
+        let latency_ms = ctx.latency_ms();
+        tokio::spawn(async move {
+            log_usage(
+                &state,
+                &provider_id,
+                "workbuddy",
+                &model,
+                &request_model,
+                &outbound_model,
+                usage,
+                latency_ms,
+                None,
+                false,
+                status.as_u16(),
+                Some(session_id),
+            )
+            .await;
+        });
+    }
+
+    strip_entity_headers_for_rebuilt_body(&mut response_headers);
+    strip_hop_by_hop_response_headers(&mut response_headers);
+    response_headers.remove(axum::http::header::CONTENT_TYPE);
+    let mut builder = axum::response::Response::builder().status(status);
+    for (key, value) in &response_headers {
+        builder = builder.header(key, value);
+    }
+    builder
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&chat_body).map_err(|error| {
+                ProxyError::Internal(format!("Failed to serialize WorkBuddy response: {error}"))
+            })?,
+        ))
+        .map_err(|error| {
+            ProxyError::Internal(format!("Failed to build WorkBuddy response: {error}"))
+        })
 }
 
 /// 处理 /v1/responses 请求（OpenAI Responses API - Codex CLI 透传）
